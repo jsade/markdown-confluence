@@ -16,6 +16,7 @@
       "@typescript-eslint/eslint-plugin": "^6.3.0",
       "@typescript-eslint/parser": "^6.3.0",
       "builtin-modules": "3.3.0",
+      "electron": "^34.3.0",
       "esbuild": "0.18.14",
       "esbuild-node-externals": "^1.8.0",
       "esbuild-plugin-copy": "^2.1.1",
@@ -38,5 +39,8 @@
    ],
    "lint-staged": {
       "packages/**/*.ts": "prettier --write"
+   },
+   "dependencies": {
+      "@electron/remote": "^2.1.2"
    }
 }
