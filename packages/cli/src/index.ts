@@ -2,15 +2,16 @@
 
 process.setMaxListeners(Infinity);
 
-import chalk from "chalk";
-import boxen from "boxen";
 import {
-	AutoSettingsLoader,
-	FileSystemAdaptor,
-	Publisher,
-	MermaidRendererPlugin,
+    AutoSettingsLoader,
+    ConsoleLogger,
+    FileSystemAdaptor,
+    MermaidRendererPlugin,
+    Publisher
 } from "@markdown-confluence/lib";
 import { PuppeteerMermaidRenderer } from "@markdown-confluence/mermaid-puppeteer-renderer";
+import boxen from "boxen";
+import chalk from "chalk";
 import { ConfluenceClient } from "confluence.js";
 
 // Define the main function
@@ -39,9 +40,16 @@ async function main() {
 		},
 	});
 
-	const publisher = new Publisher(adaptor, settingLoader, confluenceClient, [
-		new MermaidRendererPlugin(new PuppeteerMermaidRenderer()),
-	]);
+	// Create a console logger with appropriate configuration
+	const logger = new ConsoleLogger();
+
+	const publisher = new Publisher(
+		adaptor, 
+		settingLoader, 
+		confluenceClient, 
+		[new MermaidRendererPlugin(new PuppeteerMermaidRenderer())],
+		logger
+	);
 
 	const publishFilter = "";
 	const results = await publisher.publish(publishFilter);

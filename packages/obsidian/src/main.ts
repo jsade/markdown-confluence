@@ -20,6 +20,7 @@ import {
 import { ConfluenceSettingTab } from "./ConfluenceSettingTab";
 import { ObsidianConfluenceClient } from "./MyBaseClient";
 import { LogLevel, Logger } from "./utils";
+import { ObsidianLoggerAdapter } from "./utils/LoggerAdapter";
 
 export interface ObsidianPluginSettings
 	extends ConfluenceUploadSettings.ConfluenceSettings {
@@ -104,11 +105,13 @@ export default class ConfluencePlugin extends Plugin {
 			});
 
 			const settingsLoader = new StaticSettingsLoader(this.settings);
+			const loggerAdapter = new ObsidianLoggerAdapter(this.logger);
 			this.publisher = new Publisher(
 				this.adaptor,
 				settingsLoader,
 				confluenceClient,
 				[new MermaidRendererPlugin(mermaidRenderer)],
+				loggerAdapter
 			);
 
 			this.logger.info("Confluence plugin initialized successfully");

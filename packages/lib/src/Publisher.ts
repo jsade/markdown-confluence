@@ -8,6 +8,7 @@ import {
 import { adfEqual } from "./AdfEqual";
 import { CurrentAttachments } from "./Attachments";
 import { PageContentType } from "./ConniePageConfig";
+import { ConsoleLogger, ILogger } from './ILogger';
 import { SettingsLoader } from "./SettingsLoader";
 import { ensureAllFilesExistInConfluence } from "./TreeConfluence";
 import { createFolderStructure as createLocalAdfTree } from "./TreeLocal";
@@ -98,20 +99,22 @@ export class Publisher {
 	private myAccountId: string | undefined;
 	private settingsLoader: SettingsLoader;
 	private adfProcessingPlugins: ADFProcessingPlugin<unknown, unknown>[];
+	private logger: ILogger;
 
 	constructor(
 		adaptor: LoaderAdaptor,
 		settingsLoader: SettingsLoader,
 		confluenceClient: RequiredConfluenceClient,
 		adfProcessingPlugins: ADFProcessingPlugin<unknown, unknown>[],
+		logger: ILogger = new ConsoleLogger(),
 	) {
 		this.adaptor = adaptor;
 		this.settingsLoader = settingsLoader;
-
 		this.confluenceClient = confluenceClient;
 		this.adfProcessingPlugins = adfProcessingPlugins.concat(
 			AlwaysADFProcessingPlugins,
 		);
+		this.logger = logger;
 	}
 
 	async publish(publishFilter?: string) {
@@ -301,13 +304,13 @@ export class Publisher {
 			!isEqual(existingPageDetails, newPageDetails)
 		) {
 			result.contentResult = "updated";
-			console.log(`TESTING DIFF - ${adfFile.absoluteFilePath}`);
+			this.logger.debug(`TESTING DIFF - ${adfFile.absoluteFilePath}`);
 
 			const replacer = (_key: unknown, value: unknown) =>
 				typeof value === "undefined" ? null : value;
 
-			console.log(JSON.stringify(existingPageData.adfContent, replacer));
-			console.log(JSON.stringify(adfToUpload, replacer));
+			this.logger.debug(JSON.stringify(existingPageData.adfContent, replacer));
+			this.logger.debug(JSON.stringify(adfToUpload, replacer));
 
 			const updateContentDetails = {
 				...newPageDetails,

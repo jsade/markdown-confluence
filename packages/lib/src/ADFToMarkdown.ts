@@ -223,6 +223,10 @@ function renderADFContent(
 		case "tableCell": {
 			return renderChildrenResult;
 		}
+		case "decisionItem":
+		case "date": {
+			return new Error(`Unknown ADFEntity Type ${element.type}`);
+		}
 		default:
 			console.warn(`Unknown ADFEntity Type ${element.type}`);
 			return new Error(`Unknown ADFEntity Type ${element.type}`);
