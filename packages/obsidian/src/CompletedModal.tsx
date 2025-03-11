@@ -1,7 +1,7 @@
-import { Modal, App } from "obsidian";
-import ReactDOM from "react-dom";
-import React, { useState } from "react";
 import { UploadAdfFileResult } from "@markdown-confluence/lib";
+import { App, Modal } from "obsidian";
+import React, { useState } from "react";
+import ReactDOM from "react-dom";
 
 export interface FailedFile {
 	fileName: string;

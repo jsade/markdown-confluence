@@ -1,13 +1,13 @@
-import { Vault, MetadataCache, App, TFile } from "obsidian";
 import {
-	ConfluenceUploadSettings,
 	BinaryFile,
+	ConfluencePageConfig,
+	ConfluenceUploadSettings,
 	FilesToUpload,
 	LoaderAdaptor,
 	MarkdownFile,
-	ConfluencePageConfig,
 } from "@markdown-confluence/lib";
 import { lookup } from "mime-types";
+import { App, MetadataCache, TFile, Vault } from "obsidian";
 
 export default class ObsidianAdaptor implements LoaderAdaptor {
 	vault: Vault;
@@ -85,7 +85,7 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 
 		return {
 			pageTitle: file.basename,
-			folderName: file.parent.name,
+			folderName: file.parent?.name ?? "",
 			absoluteFilePath: file.path,
 			fileName: file.name,
 			contents: await this.vault.cachedRead(file),
@@ -130,11 +130,11 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 
 					const { key } =
 						config[
-							propertyKey as keyof ConfluencePageConfig.ConfluencePerPageConfig
+						propertyKey as keyof ConfluencePageConfig.ConfluencePerPageConfig
 						];
 					const value =
 						values[
-							propertyKey as keyof ConfluencePageConfig.ConfluencePerPageAllValues
+						propertyKey as keyof ConfluencePageConfig.ConfluencePerPageAllValues
 						];
 					if (propertyKey in values) {
 						fm[key] = value;

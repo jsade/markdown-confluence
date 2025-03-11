@@ -1,35 +1,35 @@
-import { Plugin, Notice, MarkdownView, Workspace, loadMermaid } from "obsidian";
 import {
-	ConfluenceUploadSettings,
-	Publisher,
 	ConfluencePageConfig,
-	StaticSettingsLoader,
-	renderADFDoc,
+	ConfluenceUploadSettings,
 	MermaidRendererPlugin,
+	Publisher,
+	StaticSettingsLoader,
 	UploadAdfFileResult,
+	renderADFDoc,
 } from "@markdown-confluence/lib";
 import { ElectronMermaidRenderer } from "@markdown-confluence/mermaid-electron-renderer";
-import { ConfluenceSettingTab } from "./ConfluenceSettingTab";
+import { Mermaid } from "mermaid";
+import { MarkdownView, Notice, Plugin, Workspace, loadMermaid } from "obsidian";
 import ObsidianAdaptor from "./adaptors/obsidian";
 import { CompletedModal } from "./CompletedModal";
-import { ObsidianConfluenceClient } from "./MyBaseClient";
 import {
 	ConfluencePerPageForm,
 	ConfluencePerPageUIValues,
 	mapFrontmatterToConfluencePerPageUIValues,
 } from "./ConfluencePerPageForm";
-import { Mermaid } from "mermaid";
+import { ConfluenceSettingTab } from "./ConfluenceSettingTab";
+import { ObsidianConfluenceClient } from "./MyBaseClient";
 
 export interface ObsidianPluginSettings
 	extends ConfluenceUploadSettings.ConfluenceSettings {
 	mermaidTheme:
-		| "match-obsidian"
-		| "light-obsidian"
-		| "dark-obsidian"
-		| "default"
-		| "neutral"
-		| "dark"
-		| "forest";
+	| "match-obsidian"
+	| "light-obsidian"
+	| "dark-obsidian"
+	| "default"
+	| "neutral"
+	| "dark"
+	| "forest";
 }
 
 interface FailedFile {
@@ -50,8 +50,8 @@ export default class ConfluencePlugin extends Plugin {
 	publisher!: Publisher;
 	adaptor!: ObsidianAdaptor;
 
-	activeLeafPath(workspace: Workspace) {
-		return workspace.getActiveViewOfType(MarkdownView)?.file.path;
+	activeLeafPath(workspace: Workspace): string | undefined {
+		return workspace.getActiveViewOfType(MarkdownView)?.file?.path;
 	}
 
 	async init() {
@@ -261,7 +261,7 @@ export default class ConfluencePlugin extends Plugin {
 					});
 				const adf = JSON.parse(
 					testingPage.body?.atlas_doc_format?.value ||
-						'{type: "doc", content:[]}',
+					'{type: "doc", content:[]}',
 				);
 				renderADFDoc(adf);
 			},
@@ -460,7 +460,7 @@ export default class ConfluencePlugin extends Plugin {
 							) {
 								const element =
 									values[
-										propertyKey as keyof ConfluencePerPageUIValues
+									propertyKey as keyof ConfluencePerPageUIValues
 									];
 								if (element.isSet) {
 									valuesToSet[
@@ -483,7 +483,7 @@ export default class ConfluencePlugin extends Plugin {
 		this.addSettingTab(new ConfluenceSettingTab(this.app, this));
 	}
 
-	override async onunload() {}
+	override async onunload() {  }
 
 	async loadSettings() {
 		this.settings = Object.assign(

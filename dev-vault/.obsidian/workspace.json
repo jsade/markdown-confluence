@@ -4,17 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "4967151cd1179a42",
+        "id": "548871053b61e942",
         "type": "tabs",
         "children": [
           {
-            "id": "3a3c400bdf18f949",
+            "id": "fd49d9eba27703f4",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {},
+              "type": "markdown",
+              "state": {
+                "file": "Root Not Top/Confluence Pages/Testing - Blockquotes.md",
+                "mode": "source",
+                "source": false
+              },
               "icon": "lucide-file",
-              "title": "New tab"
+              "title": "Testing - Blockquotes"
             }
           }
         ]
@@ -100,6 +104,7 @@
             "state": {
               "type": "backlink",
               "state": {
+                "file": "Root Not Top/Confluence Pages/Testing - Blockquotes.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -109,7 +114,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks"
+              "title": "Backlinks for Testing - Blockquotes"
             }
           },
           {
@@ -118,11 +123,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
+                "file": "Root Not Top/Confluence Pages/Testing - Blockquotes.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links"
+              "title": "Outgoing links from Testing - Blockquotes"
             }
           },
           {
@@ -146,36 +152,42 @@
             "state": {
               "type": "outline",
               "state": {
+                "file": "Root Not Top/Confluence Pages/Testing - Blockquotes.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline"
+              "title": "Outline of Testing - Blockquotes"
             }
           }
         ]
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 200
   },
   "left-ribbon": {
     "hiddenItems": {
+      "obsidian-confluence:Publish to Confluence": false,
       "switcher:Open quick switcher": false,
       "graph:Open graph view": false,
       "canvas:Create new canvas": false,
       "daily-notes:Open today's daily note": false,
       "templates:Insert template": false,
-      "command-palette:Open command palette": false
+      "command-palette:Open command palette": false,
+      "obsidian42-brat:BRAT": false
     }
   },
-  "active": "15f8973b48737c43",
+  "active": "fd49d9eba27703f4",
   "lastOpenFiles": [
+    "Root Not Top/Confluence Pages/Testing - Blockquotes.md",
+    "Root Not Top/Other Pages/Testing - Frontmatter - Publish Frontmatter.md",
+    "Root Not Top/Structure Test/Folder Note Test/Folder Note Test.md",
+    "Root Not Top/Confluence Pages/Testing - Headings.md",
     "Test Page.md",
     "Root Not Top",
     "Other Pages/Test Fence.md",
-    "Root Not Top/Other Pages/Testing - Frontmatter - Publish Frontmatter.md",
     "Root Not Top/Confluence Pages/Testing - Diagram.md",
     "Root Not Top/Confluence Pages/Testing - Comments.md",
     "Root Not Top/Confluence Pages/og-image.jpg",
@@ -184,7 +196,6 @@
     "Root Not Top/Confluence Pages/Testing All Format.md",
     "Root Not Top/Confluence Pages/Testing - Code.md",
     "Structure Test/Folder Note Test.md",
-    "Root Not Top/Structure Test/Folder Note Test/Folder Note Test.md",
     "Root Not Top/Structure Test/Folder Note Test",
     "Root Not Top/Structure Test",
     "Confluence Pages/Untitled 1.md",
@@ -201,8 +212,6 @@
     "Root Not Top/Confluence Pages/Testing - Strike-through.md",
     "Root Not Top/Confluence Pages/Testing - Tables.md",
     "Root Not Top/Confluence Pages/Testing - Task list.md",
-    "Root Not Top/Confluence Pages/Testing - Blockquotes.md",
-    "Root Not Top/Confluence Pages/Testing - Lists.md",
     "Root Not Top/Other Pages",
     "Root Not Top/Confluence Pages"
   ]

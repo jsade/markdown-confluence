@@ -1,4 +1,4 @@
-import { App, Setting, PluginSettingTab } from "obsidian";
+import { App, PluginSettingTab, Setting, TextComponent } from "obsidian";
 import ConfluencePlugin from "./main";
 
 export class ConfluenceSettingTab extends PluginSettingTab {
@@ -15,12 +15,15 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		containerEl.createEl("h2", {
-			text: "Settings for connecting to Atlassian Confluence",
+			text: "Confluence Integration",
 		});
+
+		// Atlassian Connection
+		containerEl.createEl("h2", { text: "Connection" });
 
 		new Setting(containerEl)
 			.setName("Confluence Domain")
-			.setDesc('Confluence Domain eg "https://mysite.atlassian.net"')
+			.setDesc('Your Confluence domain (e.g., "https://mysite.atlassian.net")')
 			.addText((text) =>
 				text
 					.setPlaceholder("https://mysite.atlassian.net")
@@ -33,7 +36,7 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Atlassian Username")
-			.setDesc('eg "username@domain.com"')
+			.setDesc('Your Atlassian account email (e.g., "username@domain.com")')
 			.addText((text) =>
 				text
 					.setPlaceholder("username@domain.com")
@@ -46,10 +49,10 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Atlassian API Token")
-			.setDesc("")
+			.setDesc("Your Atlassian API token (kept secure in your vault)")
 			.addText((text) =>
 				text
-					.setPlaceholder("")
+					.setPlaceholder("Enter your API token")
 					.setValue(this.plugin.settings.atlassianApiToken)
 					.onChange(async (value) => {
 						this.plugin.settings.atlassianApiToken = value;
@@ -57,9 +60,14 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		// containerEl.createEl("hr");
+
+		// Publishing
+		containerEl.createEl("h2", { text: "Publishing" });
+
 		new Setting(containerEl)
 			.setName("Confluence Parent Page ID")
-			.setDesc("Page ID to publish files under")
+			.setDesc("Page ID under which your content will be published")
 			.addText((text) =>
 				text
 					.setPlaceholder("23232345645")
@@ -70,24 +78,65 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		const folderSetting = new Setting(containerEl)
 			.setName("Folder to publish")
 			.setDesc(
-				"Publish all files except notes that are excluded using YAML Frontmatter",
+				"Specify the folder containing files to publish. Files can be excluded using YAML frontmatter."
 			)
-			.addText((text) =>
-				text
-					.setPlaceholder("")
+			.addText((text) => {
+				const textComponent = text
+					.setPlaceholder("my-confluence-content")
 					.setValue(this.plugin.settings.folderToPublish)
 					.onChange(async (value) => {
+						// Check if folder exists
+						const folderExists = this.app.vault.getAbstractFileByPath(value) !== null;
+
+						// Update UI based on validation
+						if (value && !folderExists) {
+							textComponent.inputEl.addClass("is-invalid");
+							folderValidationEl.setText("⚠️ This folder doesn't exist in your vault");
+							folderValidationEl.show();
+						} else {
+							textComponent.inputEl.removeClass("is-invalid");
+							folderValidationEl.hide();
+						}
+
+						// Still save the value (user might create the folder later)
 						this.plugin.settings.folderToPublish = value;
 						await this.plugin.saveSettings();
-					}),
-			);
+					});
+
+				return textComponent;
+			});
+
+		// Add validation message element
+		const folderValidationEl = folderSetting.descEl.createDiv("validation-error");
+		folderValidationEl.addClass("setting-item-description");
+		folderValidationEl.addClass("text-error");
+		folderValidationEl.style.marginTop = "8px";
+		folderValidationEl.hide();
+
+		// Validate on initial load
+		if (this.plugin.settings.folderToPublish) {
+			const folderExists = this.app.vault.getAbstractFileByPath(this.plugin.settings.folderToPublish) !== null;
+			if (!folderExists) {
+				const textComponent = folderSetting.components[0] as TextComponent;
+				if (textComponent?.inputEl) {
+					textComponent.inputEl.addClass("is-invalid");
+					folderValidationEl.setText("⚠️ This folder doesn't exist in your vault");
+					folderValidationEl.show();
+				}
+			}
+		}
+
+		// containerEl.createEl("hr");
+
+		// Display
+		containerEl.createEl("h2", { text: "Display" });
 
 		new Setting(containerEl)
-			.setName("First Header Page Name")
-			.setDesc("First header replaces file name as page title")
+			.setName("Use first header as page title")
+			.setDesc("When enabled, the first heading in the file will be used as the Confluence page title instead of the filename")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.firstHeadingPageTitle)
@@ -99,7 +148,7 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Mermaid Diagram Theme")
-			.setDesc("Pick the theme to apply to mermaid diagrams")
+			.setDesc("Select the theme to apply to mermaid diagrams in your Confluence pages")
 			.addDropdown((dropdown) => {
 				/* eslint-disable @typescript-eslint/naming-convention */
 				dropdown
@@ -120,5 +169,11 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 					});
 				/* eslint-enable @typescript-eslint/naming-convention */
 			});
+
+		// Add a footer with helpful information
+		containerEl.createEl("div", {
+			text: "Need help? Refer to the plugin documentation or create an issue on GitHub.",
+			cls: "setting-item-description",
+		});
 	}
 }
