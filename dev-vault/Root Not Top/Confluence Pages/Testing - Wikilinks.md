@@ -1,6 +1,0 @@
-- Bare link [[Testing - Code]]
-- Alias [[Testing - Math|Math]]
-- Header [[Testing - Code#Inline code]]
-- Header & Alias [[Testing - Code#Code blocks|Code Blocks]]
-- Multi Byte [[Testing - Multi Byte🗒️]]
-- Non Wikilink starting with [[Testing - Smartlinks

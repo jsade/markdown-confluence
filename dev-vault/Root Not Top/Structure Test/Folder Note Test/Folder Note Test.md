@@ -1,3 +1,0 @@
----
-connie-publish: true
----
