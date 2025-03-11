@@ -1,17 +1,17 @@
-import {
-	JSONDocNode,
-	JSONTransformer,
-} from "@atlaskit/editor-json-transformer";
-import { MarkdownTransformer } from "./MarkdownTransformer";
-import { traverse } from "@atlaskit/adf-utils/traverse";
-import { MarkdownFile } from "./adaptors";
-import { LocalAdfFile } from "./Publisher";
-import { processConniePerPageConfig } from "./ConniePageConfig";
-import { p } from "@atlaskit/adf-utils/builders";
-import { MarkdownToConfluenceCodeBlockLanguageMap } from "./CodeBlockLanguageMap";
 import { isSafeUrl } from "@atlaskit/adf-schema";
-import { ConfluenceSettings } from "./Settings";
+import { p } from "@atlaskit/adf-utils/builders";
+import { traverse } from "@atlaskit/adf-utils/traverse";
+import {
+    JSONDocNode,
+    JSONTransformer,
+} from "@atlaskit/editor-json-transformer";
+import { MarkdownFile } from "./adaptors";
+import { MarkdownToConfluenceCodeBlockLanguageMap } from "./CodeBlockLanguageMap";
 import { cleanUpUrlIfConfluence } from "./ConfluenceUrlParser";
+import { processConniePerPageConfig } from "./ConniePageConfig";
+import { MarkdownTransformer } from "./MarkdownTransformer";
+import { LocalAdfFile } from "./Publisher";
+import { ConfluenceSettings } from "./Settings";
 
 const frontmatterRegex = /^\s*?---\n([\s\S]*?)\n---\s*/g;
 
@@ -23,7 +23,7 @@ export function parseMarkdownToADF(
 	confluenceBaseUrl: string,
 ) {
 	const prosenodes = transformer.parse(markdown);
-	const adfNodes = serializer.encode(prosenodes);
+	const adfNodes = serializer.encode(prosenodes as unknown as Parameters<typeof serializer.encode>[0]);
 	const nodes = processADF(adfNodes, confluenceBaseUrl);
 	return nodes;
 }

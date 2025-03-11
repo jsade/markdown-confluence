@@ -21,3 +21,4 @@ dist/
 **/*.md
 dev-vault/
 **/*.ts.bak
+build.log

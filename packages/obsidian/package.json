@@ -3,7 +3,9 @@
 	"dependencies": {
 		"@markdown-confluence/lib": "5.5.2",
 		"@markdown-confluence/mermaid-electron-renderer": "5.5.2",
+		"@types/lodash-es": "^4.17.12",
 		"confluence.js": "^1.6.3",
+		"lodash-es": "^4.17.21",
 		"mime-types": "^2.1.35",
 		"react": "^16.14.0",
 		"react-dom": "^16.14.0"
