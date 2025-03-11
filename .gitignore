@@ -18,5 +18,5 @@ data.json
 .DS_Store
 
 dist/
-dev-vault/.obsidian/workspace.json
-dev-vault/Root Not Top/Confluence Pages/*.md
+*/**/*.md
+dev-vault/

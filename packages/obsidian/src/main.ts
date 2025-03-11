@@ -9,7 +9,7 @@ import {
 } from "@markdown-confluence/lib";
 import { ElectronMermaidRenderer } from "@markdown-confluence/mermaid-electron-renderer";
 import { Mermaid } from "mermaid";
-import { MarkdownView, Notice, Plugin, Workspace, loadMermaid } from "obsidian";
+import { App, MarkdownView, Notice, Plugin, PluginManifest, Workspace, loadMermaid } from "obsidian";
 import ObsidianAdaptor from "./adaptors/obsidian";
 import { CompletedModal } from "./CompletedModal";
 import {
@@ -19,6 +19,7 @@ import {
 } from "./ConfluencePerPageForm";
 import { ConfluenceSettingTab } from "./ConfluenceSettingTab";
 import { ObsidianConfluenceClient } from "./MyBaseClient";
+import { Logger } from "./utils";
 
 export interface ObsidianPluginSettings
 	extends ConfluenceUploadSettings.ConfluenceSettings {
@@ -49,59 +50,75 @@ export default class ConfluencePlugin extends Plugin {
 	workspace!: Workspace;
 	publisher!: Publisher;
 	adaptor!: ObsidianAdaptor;
+	private logger: Logger;
+
+	constructor(app: App, manifest: PluginManifest) {
+		super(app, manifest);
+		this.logger = Logger.createDefault();
+	}
 
 	activeLeafPath(workspace: Workspace): string | undefined {
 		return workspace.getActiveViewOfType(MarkdownView)?.file?.path;
 	}
 
 	async init() {
-		await this.loadSettings();
-		const { vault, metadataCache, workspace } = this.app;
-		this.workspace = workspace;
-		this.adaptor = new ObsidianAdaptor(
-			vault,
-			metadataCache,
-			this.settings,
-			this.app,
-		);
+		this.logger.info("Initializing Confluence plugin");
+		try {
+			await this.loadSettings();
+			const { vault, metadataCache, workspace } = this.app;
+			this.workspace = workspace;
+			this.adaptor = new ObsidianAdaptor(
+				vault,
+				metadataCache,
+				this.settings,
+				this.app,
+			);
 
-		const mermaidItems = await this.getMermaidItems();
-		const mermaidRenderer = new ElectronMermaidRenderer(
-			mermaidItems.extraStyleSheets,
-			mermaidItems.extraStyles,
-			mermaidItems.mermaidConfig,
-			mermaidItems.bodyStyles,
-		);
-		const confluenceClient = new ObsidianConfluenceClient({
-			host: this.settings.confluenceBaseUrl,
-			authentication: {
-				basic: {
-					email: this.settings.atlassianUserName,
-					apiToken: this.settings.atlassianApiToken,
+			const mermaidItems = await this.getMermaidItems();
+			const mermaidRenderer = new ElectronMermaidRenderer(
+				mermaidItems.extraStyleSheets,
+				mermaidItems.extraStyles,
+				mermaidItems.mermaidConfig,
+				mermaidItems.bodyStyles,
+			);
+			const confluenceClient = new ObsidianConfluenceClient({
+				host: this.settings.confluenceBaseUrl,
+				authentication: {
+					basic: {
+						email: this.settings.atlassianUserName,
+						apiToken: this.settings.atlassianApiToken,
+					},
 				},
-			},
-			middlewares: {
-				onError(e) {
-					if ("response" in e && "data" in e.response) {
-						e.message =
-							typeof e.response.data === "string"
-								? e.response.data
-								: JSON.stringify(e.response.data);
-					}
+				middlewares: {
+					onError: (e) => {
+						this.logger.error(`Error in plugin init: ${e.message}`, e);
+						if ("response" in e && "data" in e.response) {
+							e.message =
+								typeof e.response.data === "string"
+									? e.response.data
+									: JSON.stringify(e.response.data);
+						}
+					},
 				},
-			},
-		});
+			});
 
-		const settingsLoader = new StaticSettingsLoader(this.settings);
-		this.publisher = new Publisher(
-			this.adaptor,
-			settingsLoader,
-			confluenceClient,
-			[new MermaidRendererPlugin(mermaidRenderer)],
-		);
+			const settingsLoader = new StaticSettingsLoader(this.settings);
+			this.publisher = new Publisher(
+				this.adaptor,
+				settingsLoader,
+				confluenceClient,
+				[new MermaidRendererPlugin(mermaidRenderer)],
+			);
+
+			this.logger.info("Confluence plugin initialized successfully");
+		} catch (error) {
+			this.logger.error("Failed to initialize Confluence plugin", error);
+			throw error;
+		}
 	}
 
 	async getMermaidItems() {
+		this.logger.debug("Getting Mermaid items");
 		const extraStyles: string[] = [];
 		const extraStyleSheets: string[] = [];
 		let bodyStyles = "";
@@ -173,32 +190,46 @@ export default class ConfluencePlugin extends Plugin {
 	}
 
 	async doPublish(publishFilter?: string): Promise<UploadResults> {
-		const adrFiles = await this.publisher.publish(publishFilter);
+		this.logger.info("Starting publication process", { publishFilter });
 
-		const returnVal: UploadResults = {
-			errorMessage: null,
-			failedFiles: [],
-			filesUploadResult: [],
-		};
+		try {
+			const adrFiles = await this.publisher.publish(publishFilter);
 
-		adrFiles.forEach((element) => {
-			if (element.successfulUploadResult) {
-				returnVal.filesUploadResult.push(
-					element.successfulUploadResult,
-				);
-				return;
-			}
+			const returnVal: UploadResults = {
+				errorMessage: null,
+				failedFiles: [],
+				filesUploadResult: [],
+			};
 
-			returnVal.failedFiles.push({
-				fileName: element.node.file.absoluteFilePath,
-				reason: element.reason ?? "No Reason Provided",
+			adrFiles.forEach((element) => {
+				if (element.successfulUploadResult) {
+					returnVal.filesUploadResult.push(
+						element.successfulUploadResult,
+					);
+					return;
+				}
+
+				returnVal.failedFiles.push({
+					fileName: element.node.file.absoluteFilePath,
+					reason: element.reason ?? "No Reason Provided",
+				});
 			});
-		});
 
-		return returnVal;
+			this.logger.info(`Publication complete. Results: ${returnVal.filesUploadResult.length} files uploaded, ${returnVal.failedFiles.length} failed`);
+			return returnVal;
+		} catch (error) {
+			this.logger.error("Error during publication", error);
+			return {
+				errorMessage: error instanceof Error ? error.message : JSON.stringify(error),
+				failedFiles: [],
+				filesUploadResult: [],
+			};
+		}
 	}
 
 	override async onload() {
+		this.logger.info("Loading Confluence plugin");
+
 		await this.init();
 
 		this.addRibbonIcon("cloud", "Publish to Confluence", async () => {
@@ -481,21 +512,29 @@ export default class ConfluencePlugin extends Plugin {
 		});
 
 		this.addSettingTab(new ConfluenceSettingTab(this.app, this));
+
+		this.logger.info("Confluence plugin loaded successfully");
 	}
 
-	override async onunload() {  }
+	override async onunload() {
+		this.logger.info("Unloading Confluence plugin");
+	}
 
 	async loadSettings() {
+		this.logger.debug("Loading plugin settings");
 		this.settings = Object.assign(
 			{},
 			ConfluenceUploadSettings.DEFAULT_SETTINGS,
 			{ mermaidTheme: "match-obsidian" },
 			await this.loadData(),
 		);
+		this.logger.debug("Settings loaded successfully");
 	}
 
 	async saveSettings() {
+		this.logger.debug("Saving plugin settings");
 		await this.saveData(this.settings);
 		await this.init();
+		this.logger.debug("Settings saved successfully");
 	}
 }
