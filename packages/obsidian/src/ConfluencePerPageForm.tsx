@@ -1,8 +1,16 @@
-import { Modal, App, FrontMatterCache } from "obsidian";
-import ReactDOM from "react-dom";
-import React, { useState, ChangeEvent } from "react";
 import { ConfluencePageConfig } from "@markdown-confluence/lib";
 import { Property } from "csstype";
+import { App, FrontMatterCache, Modal } from "obsidian";
+import React, { ChangeEvent, useState } from "react";
+import ReactDOM from "react-dom";
+import { Logger, LogLevel } from "./utils";
+
+// Create a module-level logger for functions outside classes
+const logger = Logger.createDefault();
+logger.updateOptions({
+	prefix: "ConfluencePerPageForm",
+	minLevel: LogLevel.SILENT, // Default to silent, will be updated by plugin if available
+});
 
 export type ConfluencePerPageUIValues = {
 	[K in keyof ConfluencePageConfig.ConfluencePerPageConfig]: {
@@ -16,6 +24,7 @@ export type ConfluencePerPageUIValues = {
 export function mapFrontmatterToConfluencePerPageUIValues(
 	frontmatter: FrontMatterCache | undefined,
 ): ConfluencePerPageUIValues {
+	logger.debug("Mapping frontmatter to UI values", frontmatter);
 	const config = ConfluencePageConfig.conniePerPageConfig;
 	const result: Partial<ConfluencePerPageUIValues> = {};
 
@@ -499,25 +508,37 @@ const ConfluenceForm: React.FC<FormProps> = ({
 
 export class ConfluencePerPageForm extends Modal {
 	modalProps: ModalProps;
+	private logger: Logger;
 
 	constructor(app: App, modalProps: ModalProps) {
 		super(app);
 		this.modalProps = modalProps;
+		this.logger = Logger.createDefault();
+		this.logger.updateOptions({
+			prefix: "ConfluencePerPageForm",
+			minLevel: LogLevel.SILENT, // Default to silent, will be updated by plugin if available
+		});
+		this.logger.debug("ConfluencePerPageForm initialized");
 	}
 
 	override onOpen() {
+		this.logger.debug("Opening per-page form");
 		const { contentEl } = this;
-		const test: FormProps = {
-			...this.modalProps,
-			onSubmit: (values) => {
-				const boundClose = this.close.bind(this);
-				this.modalProps.onSubmit(values, boundClose);
-			},
-		};
-		ReactDOM.render(React.createElement(ConfluenceForm, test), contentEl);
+		ReactDOM.render(
+			<ConfluenceForm
+				config={this.modalProps.config}
+				initialValues={this.modalProps.initialValues}
+				onSubmit={(values) => {
+					this.logger.debug("Form submitted with values", values);
+					this.modalProps.onSubmit(values, () => this.close());
+				}}
+			/>,
+			contentEl,
+		);
 	}
 
 	override onClose() {
+		this.logger.debug("Closing per-page form");
 		const { contentEl } = this;
 		ReactDOM.unmountComponentAtNode(contentEl);
 		contentEl.empty();

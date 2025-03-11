@@ -8,12 +8,14 @@ import {
 } from "@markdown-confluence/lib";
 import { lookup } from "mime-types";
 import { App, MetadataCache, TFile, Vault } from "obsidian";
+import { Logger, LogLevel } from "../utils";
 
 export default class ObsidianAdaptor implements LoaderAdaptor {
 	vault: Vault;
 	metadataCache: MetadataCache;
 	settings: ConfluenceUploadSettings.ConfluenceSettings;
 	app: App;
+	private logger: Logger;
 
 	constructor(
 		vault: Vault,
@@ -25,19 +27,28 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 		this.metadataCache = metadataCache;
 		this.settings = settings;
 		this.app = app;
+		this.logger = Logger.createDefault();
+		this.logger.updateOptions({
+			prefix: "ObsidianAdaptor",
+			minLevel: ('logLevel' in this.settings ? this.settings.logLevel as unknown as LogLevel : LogLevel.SILENT),
+		});
 	}
 
 	async getMarkdownFilesToUpload(): Promise<FilesToUpload> {
+		this.logger.debug("Getting markdown files to upload");
 		const files = this.vault.getMarkdownFiles();
+		this.logger.debug(`Found ${files.length} total markdown files in vault`);
 		const filesToPublish = [];
 		for (const file of files) {
 			try {
 				if (file.path.endsWith(".excalidraw")) {
+					this.logger.debug(`Skipping excalidraw file: ${file.path}`);
 					continue;
 				}
 
 				const fileFM = this.metadataCache.getCache(file.path);
 				if (!fileFM) {
+					this.logger.warn(`Missing file in metadata cache: ${file.path}`);
 					throw new Error("Missing File in Metadata Cache");
 				}
 				const frontMatter = fileFM.frontmatter;
@@ -48,12 +59,17 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 							frontMatter["connie-publish"] !== false)) ||
 					(frontMatter && frontMatter["connie-publish"] === true)
 				) {
+					this.logger.debug(`Adding file to publish: ${file.path}`);
 					filesToPublish.push(file);
+				} else {
+					this.logger.debug(`Skipping file: ${file.path}`);
 				}
-			} catch {
+			} catch (error) {
+				this.logger.error(`Error processing file: ${error instanceof Error ? error.message : String(error)}`);
 				//ignore
 			}
 		}
+		this.logger.info(`Found ${filesToPublish.length} files to publish`);
 		const filesToUpload = [];
 
 		for (const file of filesToPublish) {
@@ -65,6 +81,7 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 	}
 
 	async loadMarkdownFile(absoluteFilePath: string): Promise<MarkdownFile> {
+		this.logger.debug(`Loading markdown file: ${absoluteFilePath}`);
 		const file = this.app.vault.getAbstractFileByPath(absoluteFilePath);
 		if (!(file instanceof TFile)) {
 			throw new Error("Not a TFile");
@@ -97,6 +114,7 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 		path: string,
 		referencedFromFilePath: string,
 	): Promise<BinaryFile | false> {
+		this.logger.debug(`Reading binary file: ${path} (referenced from ${referencedFromFilePath})`);
 		const testing = this.metadataCache.getFirstLinkpathDest(
 			path,
 			referencedFromFilePath,
@@ -119,6 +137,7 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 		absoluteFilePath: string,
 		values: Partial<ConfluencePageConfig.ConfluencePerPageAllValues>,
 	): Promise<void> {
+		this.logger.debug(`Updating markdown values for: ${absoluteFilePath}`, values);
 		const config = ConfluencePageConfig.conniePerPageConfig;
 		const file = this.app.vault.getAbstractFileByPath(absoluteFilePath);
 		if (file instanceof TFile) {

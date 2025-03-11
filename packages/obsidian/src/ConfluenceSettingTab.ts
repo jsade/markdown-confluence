@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting, TextComponent } from "obsidian";
 import ConfluencePlugin from "./main";
+import { LogLevel } from "./utils";
 
 export class ConfluenceSettingTab extends PluginSettingTab {
 	plugin: ConfluencePlugin;
@@ -175,5 +176,34 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 			text: "Need help? Refer to the plugin documentation or create an issue on GitHub.",
 			cls: "setting-item-description",
 		});
+
+		containerEl.createEl("br");
+
+		// Add debug logging settings
+		new Setting(containerEl)
+			.setName("Developer")
+			.setHeading();
+
+		new Setting(containerEl)
+			.setName("Debug Logging Level")
+			.setDesc("Set the level of detail for debug logging")
+			.addDropdown((dropdown) => {
+				/* eslint-disable @typescript-eslint/naming-convention */
+				dropdown
+					.addOptions({
+						"4": "Silent (No Logs)",
+						"3": "Error Only",
+						"2": "Warning & Error",
+						"1": "Info, Warning & Error",
+						"0": "All (Debug, Info, Warning & Error)",
+					})
+					/* eslint-enable @typescript-eslint/naming-convention */
+					.setValue(String(this.plugin.settings.logLevel !== undefined ? this.plugin.settings.logLevel : LogLevel.SILENT))
+					.onChange(async (value) => {
+						this.plugin.settings.logLevel = parseInt(value) as LogLevel;
+						await this.plugin.saveSettings();
+						// Logger will be updated when settings are saved
+					});
+			});
 	}
 }

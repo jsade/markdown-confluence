@@ -19,7 +19,7 @@ import {
 } from "./ConfluencePerPageForm";
 import { ConfluenceSettingTab } from "./ConfluenceSettingTab";
 import { ObsidianConfluenceClient } from "./MyBaseClient";
-import { Logger } from "./utils";
+import { LogLevel, Logger } from "./utils";
 
 export interface ObsidianPluginSettings
 	extends ConfluenceUploadSettings.ConfluenceSettings {
@@ -31,6 +31,7 @@ export interface ObsidianPluginSettings
 	| "neutral"
 	| "dark"
 	| "forest";
+	logLevel: LogLevel;
 }
 
 interface FailedFile {
@@ -270,11 +271,11 @@ export default class ConfluencePlugin extends Plugin {
 			id: "adf-to-markdown",
 			name: "ADF To Markdown",
 			callback: async () => {
-				console.log("HMMMM");
+				this.logger.debug("Starting ADF to Markdown conversion");
 				const json = JSON.parse(
 					'{"type":"doc","content":[{"type":"paragraph","content":[{"text":"Testing","type":"text"}]}],"version":1}',
 				);
-				console.log({ json });
+				this.logger.debug("Parsed JSON", { json });
 
 				const confluenceClient = new ObsidianConfluenceClient({
 					host: this.settings.confluenceBaseUrl,
@@ -523,11 +524,19 @@ export default class ConfluencePlugin extends Plugin {
 	async loadSettings() {
 		this.logger.debug("Loading plugin settings");
 		this.settings = Object.assign(
-			{},
-			ConfluenceUploadSettings.DEFAULT_SETTINGS,
-			{ mermaidTheme: "match-obsidian" },
+			{
+				...ConfluenceUploadSettings.DEFAULT_SETTINGS,
+				mermaidTheme: "match-obsidian",
+				logLevel: LogLevel.SILENT,
+			},
 			await this.loadData(),
 		);
+
+		if (this.logger) {
+			this.logger.updateOptions({
+				minLevel: this.settings.logLevel as LogLevel
+			});
+		}
 		this.logger.debug("Settings loaded successfully");
 	}
 

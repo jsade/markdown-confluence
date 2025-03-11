@@ -2,6 +2,7 @@ import { UploadAdfFileResult } from "@markdown-confluence/lib";
 import { App, Modal } from "obsidian";
 import React, { useState } from "react";
 import ReactDOM from "react-dom";
+import { Logger, LogLevel } from "./utils";
 
 export interface FailedFile {
 	fileName: string;
@@ -138,23 +139,34 @@ const CompletedView: React.FC<UploadResultsProps> = ({ uploadResults }) => {
 
 export class CompletedModal extends Modal {
 	uploadResults: UploadResultsProps;
+	private logger: Logger;
 
 	constructor(app: App, uploadResults: UploadResultsProps) {
 		super(app);
 		this.uploadResults = uploadResults;
+		this.logger = Logger.createDefault();
+		this.logger.updateOptions({
+			prefix: "CompletedModal",
+			minLevel: LogLevel.SILENT, // Default to silent, will be updated by plugin if available
+		});
+		this.logger.debug("CompletedModal initialized", { 
+			failedFiles: uploadResults.uploadResults.failedFiles.length,
+			filesUploaded: uploadResults.uploadResults.filesUploadResult.length 
+		});
 	}
 
 	override onOpen() {
+		this.logger.debug("Opening completed modal");
 		const { contentEl } = this;
 		ReactDOM.render(
-			React.createElement(CompletedView, this.uploadResults),
+			<CompletedView uploadResults={this.uploadResults.uploadResults} />,
 			contentEl,
 		);
 	}
 
 	override onClose() {
+		this.logger.debug("Closing completed modal");
 		const { contentEl } = this;
 		ReactDOM.unmountComponentAtNode(contentEl);
-		contentEl.empty();
 	}
 }

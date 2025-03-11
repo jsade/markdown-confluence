@@ -1,24 +1,33 @@
 import { RequiredConfluenceClient } from "@markdown-confluence/lib";
 import {
-    Api,
-    AuthenticationService,
-    Callback,
-    Client,
-    Config,
-    RequestConfig,
+	Api,
+	AuthenticationService,
+	Callback,
+	Client,
+	Config,
+	RequestConfig,
 } from "confluence.js";
 import { requestUrl } from "obsidian";
+import { Logger, LogLevel } from "./utils";
 
 const ATLASSIAN_TOKEN_CHECK_FLAG = "X-Atlassian-Token";
 const ATLASSIAN_TOKEN_CHECK_NOCHECK_VALUE = "no-check";
 
 export class MyBaseClient implements Client {
 	protected urlSuffix = "/wiki/rest";
+	protected logger: Logger;
 
-	constructor(protected readonly config: Config) {}
+	constructor(protected readonly config: Config) {
+		this.logger = Logger.createDefault();
+		this.logger.updateOptions({
+			prefix: "ConfluenceClient",
+			minLevel: LogLevel.SILENT, // Default to silent, will be updated by plugin if available
+		});
+	}
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	protected paramSerializer(parameters: Record<string, any>): string {
+		this.logger.debug("Serializing parameters", parameters);
 		const parts: string[] = [];
 
 		Object.entries(parameters).forEach(([key, value]) => {
@@ -93,6 +102,11 @@ export class MyBaseClient implements Client {
 		requestConfig: RequestConfig,
 		callback: Callback<T> | never,
 	): Promise<void | T> {
+		this.logger.debug("Sending request", {
+			method: requestConfig.method,
+			url: requestConfig.url,
+			params: requestConfig.params
+		});
 		try {
 			const contentType = (requestConfig.headers ?? {})[
 				"content-type"
@@ -112,9 +126,9 @@ export class MyBaseClient implements Client {
 				"multipart/form-data",
 			)
 				? [
-						requestConfig.data.getHeaders(),
-						requestConfig.data.getBuffer().buffer,
-				  ]
+					requestConfig.data.getHeaders(),
+					requestConfig.data.getBuffer().buffer,
+				]
 				: [{}, JSON.stringify(requestConfig.data)];
 
 			const modifiedRequestConfig = {
@@ -170,7 +184,7 @@ export class MyBaseClient implements Client {
 			return responseHandler(response.json);
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		} catch (e: any) {
-			console.warn({ httpError: e, requestConfig });
+			this.logger.warn("HTTP Error occurred", { httpError: e, requestConfig });
 			const err =
 				this.config.newErrorHandling && e.isAxiosError
 					? e.response.data
@@ -210,11 +224,23 @@ export class HTTPError extends Error {
 
 export class ObsidianConfluenceClient
 	extends MyBaseClient
-	implements RequiredConfluenceClient
-{
-	content = new Api.Content(this);
-	space = new Api.Space(this);
-	contentAttachments = new Api.ContentAttachments(this);
-	contentLabels = new Api.ContentLabels(this);
-	users = new Api.Users(this);
+	implements RequiredConfluenceClient {
+	content: Api.Content;
+	space: Api.Space;
+	contentAttachments: Api.ContentAttachments;
+	contentLabels: Api.ContentLabels;
+	users: Api.Users;
+
+	constructor(config: Config) {
+		super(config);
+		this.logger.updateOptions({
+			prefix: "ObsidianConfluenceClient",
+		});
+		this.logger.debug("Initializing ObsidianConfluenceClient");
+		this.content = new Api.Content(this);
+		this.space = new Api.Space(this);
+		this.contentAttachments = new Api.ContentAttachments(this);
+		this.contentLabels = new Api.ContentLabels(this);
+		this.users = new Api.Users(this);
+	}
 }
