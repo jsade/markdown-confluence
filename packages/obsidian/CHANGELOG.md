@@ -1,3 +1,10 @@
+## [Unreleased]
+
+### Fixed
+- Fixed frontmatter publishing mode to correctly honor the `connie-parent-page-id` in PSF Folder Notes, allowing each PSF to publish to its own target page in Confluence.
+
+## [3.7.2] - 2024-02-17
+
 # Changelog
 
 ### Dependencies
@@ -948,7 +955,6 @@
 
 * Bump obsidian version ([c42e0d2](https://github.com/markdown-confluence/markdown-confluence/commit/c42e0d2335c52a4beddcb0273e17ad287b9166ea))
 * Bump version I hope ([39b93eb](https://github.com/markdown-confluence/markdown-confluence/commit/39b93eba447f2a1f706ff6e65e7e8cabea08bf75))
-* **ReleasePlease:** Fix to use a different name for package due to the actual obsidian package ([3f94f7e](https://github.com/markdown-confluence/markdown-confluence/commit/3f94f7e15745139f7530ae1f86b0334f7d6ff184))
 
 
 ### Miscellaneous Chores
