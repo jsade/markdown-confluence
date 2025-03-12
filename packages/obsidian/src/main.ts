@@ -3,6 +3,7 @@ import {
 	ConfluenceUploadSettings,
 	MermaidRendererPlugin,
 	Publisher,
+	RequiredConfluenceClient,
 	SettingsLoader,
 	UploadAdfFileResult
 } from "@markdown-confluence/lib";
@@ -108,18 +109,30 @@ export default class ConfluencePlugin extends Plugin {
 		// Create a settings loader with the current settings
 		const settingsLoader = new ObsidianSettingsLoader(this.settings);
 
+		// Create the Confluence client
+		const confluenceClient = new ObsidianConfluenceClient({
+			host: this.settings.confluenceBaseUrl || '',
+			authentication: {
+				basic: {
+					email: this.settings.atlassianUserName || '',
+					apiToken: this.settings.atlassianApiToken || ''
+				}
+			}
+		});
+
+		// Try to detect API v2 support
+		try {
+			this.logger.info("Checking for Confluence API v2 support");
+			await confluenceClient.detectApiV2();
+			this.logger.info(`Using Confluence API version: ${confluenceClient.apiVersion}`);
+		} catch (error) {
+			this.logger.warn("Failed to detect Confluence API version, defaulting to v1", error);
+		}
+
 		this.publisher = new Publisher(
 			this.adaptor,
 			settingsLoader,
-			new ObsidianConfluenceClient({
-				host: this.settings.confluenceBaseUrl || '',
-				authentication: {
-					basic: {
-						email: this.settings.atlassianUserName || '',
-						apiToken: this.settings.atlassianApiToken || ''
-					}
-				}
-			}),
+			confluenceClient as RequiredConfluenceClient,
 			[new MermaidRendererPlugin(new ElectronMermaidRenderer(
 				[], // extraStyleSheets
 				[], // extraStyles
@@ -281,6 +294,16 @@ export default class ConfluencePlugin extends Plugin {
 				hotkeys: [],
 				callback: async () => {
 					await this.testPSFDetection();
+				},
+			});
+
+			// Add command to test API version detection
+			this.addCommand({
+				id: "test-api-version",
+				name: "Debug: Test Confluence API Version",
+				hotkeys: [],
+				callback: async () => {
+					await this.testApiVersion();
 				},
 			});
 		}
@@ -548,6 +571,55 @@ export default class ConfluencePlugin extends Plugin {
 		} catch (error) {
 			this.logger.error("Error testing PSF detection:", error);
 			new Notice(`Error testing PSF detection: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	async testApiVersion() {
+		this.logger.info("Testing Confluence API version detection");
+
+		try {
+			const client = new ObsidianConfluenceClient({
+				host: this.settings.confluenceBaseUrl || '',
+				authentication: {
+					basic: {
+						email: this.settings.atlassianUserName || '',
+						apiToken: this.settings.atlassianApiToken || ''
+					}
+				}
+			});
+
+			// Try to detect API v2 support
+			const hasApiV2 = await client.detectApiV2();
+
+			if (hasApiV2) {
+				const message = `Confluence API v2 is available! This means folder support is available.`;
+				this.logger.info(message);
+				new Notice(message);
+
+				// Try to test folder endpoints specifically
+				try {
+					await client.fetch('/api/v2/spaces?limit=1', {
+						headers: { Accept: 'application/json' }
+					});
+
+					const spaceMessage = 'Successfully accessed spaces via API v2';
+					this.logger.info(spaceMessage);
+					new Notice(spaceMessage);
+
+				} catch (spaceError) {
+					const errorMessage = `Error accessing API v2 spaces: ${spaceError instanceof Error ? spaceError.message : String(spaceError)}`;
+					this.logger.error(errorMessage);
+					new Notice(errorMessage);
+				}
+			} else {
+				const message = `Confluence API v2 is NOT available. Folder support requires API v2.`;
+				this.logger.warn(message);
+				new Notice(message);
+			}
+		} catch (error) {
+			const errorMessage = `Error testing API version: ${error instanceof Error ? error.message : String(error)}`;
+			this.logger.error(errorMessage);
+			new Notice(errorMessage);
 		}
 	}
 

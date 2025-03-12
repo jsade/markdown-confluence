@@ -11,6 +11,7 @@ export interface MarkdownFile {
 	frontmatter: {
 		[key: string]: unknown;
 	};
+	tags?: string[];
 }
 
 export interface BinaryFile {
@@ -31,6 +32,13 @@ export interface LoaderAdaptor {
 		path: string,
 		referencedFromFilePath: string,
 	): Promise<BinaryFile | false>;
+
+	/**
+	 * Find PSFs (Publish Source Folders) by frontmatter configuration
+	 * This is an optional method that may not be implemented by all adaptors
+	 * @returns A map of folder paths to their parent page IDs
+	 */
+	findPSFsByFrontmatter?(): Promise<Map<string, string>>;
 }
 
 export interface RequiredConfluenceClient {
@@ -39,6 +47,61 @@ export interface RequiredConfluenceClient {
 	contentAttachments: Api.ContentAttachments;
 	contentLabels: Api.ContentLabels;
 	users: Api.Users;
+	apiVersion?: 'v1' | 'v2';
+	v2?: {
+		folders: {
+			getFolderById: (id: string) => Promise<{
+				id: string;
+				title: string;
+				[key: string]: unknown;
+			}>;
+			createFolder: (params: {
+				spaceId: string;
+				title: string;
+				parentId?: string;
+			}) => Promise<{
+				id: string;
+				title: string;
+				[key: string]: unknown;
+			}>;
+			updateFolder?: (id: string, params: {
+				title?: string;
+				parentId?: string;
+			}) => Promise<{
+				id: string;
+				title: string;
+				[key: string]: unknown;
+			}>;
+		};
+	};
+	fetch?: (url: string, options?: Record<string, unknown>) => Promise<unknown>;
+
+	/**
+	 * Search for content using Confluence Query Language (CQL)
+	 * @param cql The CQL query string
+	 * @param limit Optional limit for the number of results (default: 10)
+	 * @returns Search results
+	 */
+	searchContentByCQL?: (cql: string, limit?: number) => Promise<{
+		results: Array<Record<string, unknown>>;
+		size: number;
+		start: number;
+		limit: number;
+		[key: string]: unknown;
+	}>;
+
+	/**
+	 * Find a folder by title in a specific space
+	 * @param title The folder title to search for
+	 * @param spaceKey The space key to search in
+	 * @returns The folder details if found, or null if not found
+	 */
+	findFolderByTitle?: (title: string, spaceKey: string) => Promise<{
+		id: string;
+		title: string;
+		type: string;
+		[key: string]: unknown;
+	} | null>;
 }
 
 export * from "./filesystem";

@@ -17,8 +17,12 @@ data.json
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
 
+# Development
 dist/
-**/*.md
 dev-vault/
 **/*.ts.bak
 build.log
+*.postman.json
+openapi*.json
+*.md
+*.markdown

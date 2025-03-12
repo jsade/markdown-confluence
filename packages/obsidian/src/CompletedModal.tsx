@@ -24,9 +24,9 @@ const CompletedView: React.FC<UploadResultsProps> = ({ uploadResults }) => {
 	const [expanded, setExpanded] = useState(false);
 
 	const countResults = {
-		content: { same: 0, updated: 0 },
-		images: { same: 0, updated: 0 },
-		labels: { same: 0, updated: 0 },
+		content: { same: 0, updated: 0, error: 0 },
+		images: { same: 0, updated: 0, error: 0 },
+		labels: { same: 0, updated: 0, error: 0 },
 	};
 
 	filesUploadResult.forEach((result) => {
@@ -149,9 +149,9 @@ export class CompletedModal extends Modal {
 			prefix: "CompletedModal",
 			minLevel: LogLevel.SILENT, // Default to silent, will be updated by plugin if available
 		});
-		this.logger.debug("CompletedModal initialized", { 
+		this.logger.debug("CompletedModal initialized", {
 			failedFiles: uploadResults.uploadResults.failedFiles.length,
-			filesUploaded: uploadResults.uploadResults.filesUploadResult.length 
+			filesUploaded: uploadResults.uploadResults.filesUploadResult.length,
 		});
 	}
 

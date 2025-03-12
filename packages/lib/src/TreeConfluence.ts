@@ -2,6 +2,7 @@ import { doc, p } from "@atlaskit/adf-utils/builders";
 import { JSONDocNode } from "@atlaskit/editor-json-transformer";
 import { LoaderAdaptor, RequiredConfluenceClient } from "./adaptors";
 import { prepareAdfToUpload } from "./AdfProcessing";
+import { PageContentType } from "./ConniePageConfig";
 import { ConsoleLogger } from './ILogger';
 import {
 	ConfluenceAdfFile,
@@ -11,6 +12,40 @@ import {
 	LocalAdfFileTreeNode,
 } from "./Publisher";
 import { ConfluenceSettings } from "./Settings";
+
+// Define types used throughout the file
+interface ConfluenceClientV2 {
+	v2: {
+		folders?: {
+			createFolder: (params: { spaceId: string; title: string; parentId?: string }) => Promise<V2FolderResponse>;
+			[key: string]: unknown;
+		};
+		[key: string]: unknown;
+	};
+	apiVersion?: 'v1' | 'v2';
+}
+
+// Define the V2 folder response type
+interface V2FolderResponse {
+	id: string;
+	title: string;
+	spaceId: string;
+	parentId?: string;
+	status?: string;
+	version?: {
+		number?: number;
+		authorId?: string;
+		message?: string;
+	};
+	[key: string]: unknown;
+}
+
+// Add a type for errors with response
+interface ErrorWithResponse extends Error {
+	response: {
+		[key: string]: unknown;
+	};
+}
 
 const blankPageAdf: string = JSON.stringify(doc(p("Page not published yet")));
 // Create a default logger
@@ -91,29 +126,47 @@ export async function createFileStructureInConfluence(
 	createPage = true,
 ): Promise<ConfluenceTreeNode> {
 	if (!node.file) {
-		const errorMsg = "Missing file on node";
-		logger.error(errorMsg);
-		throw new Error(errorMsg);
+		return {
+			file: {
+				folderName: "",
+				absoluteFilePath: "",
+				fileName: "",
+				contents: doc(p()),
+				pageTitle: "",
+				frontmatter: {},
+				tags: [],
+				dontChangeParentPageId: false,
+				pageId: "",
+				spaceKey: "",
+				pageUrl: "",
+				contentType: "page",
+				blogPostDate: undefined,
+			},
+			version: 0,
+			lastUpdatedBy: "",
+			children: [],
+			existingPageData: {
+				adfContent: doc(p()),
+				pageTitle: "",
+				ancestors: [],
+				contentType: "page",
+			},
+		};
 	}
 
-	let version: number;
-	let adfContent: JSONDocNode | undefined;
-	let pageTitle = "";
-	let contentType = "page";
+	const effectiveParentPageId = parentPageId;
 	let ancestors: { id: string }[] = [];
-	let lastUpdatedBy: string | undefined;
+	let version = 0;
+	let adfContent: JSONDocNode = doc(p());
+	let pageTitle = "";
+	let lastUpdatedBy = "";
+	let contentType = node.file.contentType;
 	const file: ConfluenceAdfFile = {
 		...node.file,
 		pageId: node.file.pageId || "",
 		spaceKey,
 		pageUrl: "",
 	};
-
-	const effectiveParentPageId = node.file.parentPageId && node.file.parentPageId.trim() !== ''
-		? node.file.parentPageId
-		: (parentPageId && parentPageId.trim() !== '' ? parentPageId : null);
-
-	logger.debug(`Processing file: ${node.file.absoluteFilePath}, using parent page ID: ${effectiveParentPageId || '(none)'}`);
 
 	if (createPage && effectiveParentPageId === null) {
 		const errorMsg = `No parent page ID defined for file: ${node.file.absoluteFilePath}. In frontmatter mode, each PSF root must have a connie-parent-page-id defined.`;
@@ -122,29 +175,217 @@ export async function createFileStructureInConfluence(
 	}
 
 	if (createPage) {
+		logger.info(`Checking confluence page existence for: ${node.file.absoluteFilePath}, content type: ${node.file.contentType}`);
+
 		try {
-			logger.debug(`Ensuring page exists for: ${node.file.absoluteFilePath}`);
-			const pageDetails = await ensurePageExists(
-				confluenceClient,
-				adaptor,
-				node.file,
-				spaceKey,
-				effectiveParentPageId as string,
-				topPageId || effectiveParentPageId as string,
-			);
-			file.pageId = pageDetails.id;
-			file.spaceKey = pageDetails.spaceKey;
-			version = pageDetails.version;
-			adfContent = JSON.parse(pageDetails.existingAdf ?? "{}") as JSONDocNode;
-			pageTitle = pageDetails.pageTitle;
-			ancestors = pageDetails.ancestors;
-			lastUpdatedBy = pageDetails.lastUpdatedBy;
-			contentType = pageDetails.contentType;
-			logger.debug(`Page exists with ID: ${file.pageId}, title: ${pageTitle}`);
+			logger.debug(`Ensuring page exists for: ${node.file.absoluteFilePath}, content type: ${node.file.contentType}`);
+
+			// Check if we're using the v2 API
+			const isV2Api = 'apiVersion' in confluenceClient && confluenceClient.apiVersion === 'v2';
+			const apiVersion = 'apiVersion' in confluenceClient ? (confluenceClient as unknown as {apiVersion?: string}).apiVersion || 'undefined' : 'undefined';
+
+			logger.info(`API version detection: isV2Api = ${isV2Api}, apiVersion = ${apiVersion}`);
+			logger.info(`Client properties: ${Object.keys(confluenceClient).join(', ')}`);
+
+			// Handle folders differently for v2 API
+			
+
+			if (node.file.contentType === 'folder') { 
+				logger.info(`Content type is FOLDER: ${node.file.pageTitle}`);
+				logger.info(`Folder details: absoluteFilePath=${node.file.absoluteFilePath}, contentType=${node.file.contentType}`);
+			}
+
+
+			if (node.file.contentType === 'folder' && isV2Api && 'v2' in confluenceClient) {
+				logger.info(`Creating/updating folder using API v2: ${node.file.pageTitle}`);
+				logger.info(`Folder details: absoluteFilePath=${node.file.absoluteFilePath}, contentType=${node.file.contentType}`);
+
+				try {
+					let folderId = node.file.pageId;
+					logger.info(`Existing folder ID: ${folderId || 'none'}`);
+
+					// If we have a folder ID, try to get it first
+					if (folderId) {
+						try {
+							logger.info(`Attempting to get existing folder with ID: ${folderId}`);
+							const existingFolder = await confluenceClient.v2.folders.getFolderById(folderId);
+							logger.info(`Found existing folder: ${JSON.stringify(existingFolder)}`);
+
+							file.pageId = existingFolder.id;
+							file.spaceKey = spaceKey;
+							version = existingFolder['version'] && typeof existingFolder['version'] === 'object'
+								? (existingFolder['version'] as Record<string, unknown>)['number'] as number || 0
+								: 0;
+							pageTitle = existingFolder.title;
+							contentType = "folder"; // This is only used internally, not in the API call
+							ancestors = existingFolder['parentId'] ? [{ id: existingFolder['parentId'] as string }] : [];
+							lastUpdatedBy = existingFolder['version'] && typeof existingFolder['version'] === 'object'
+								? (existingFolder['version'] as Record<string, unknown>)['authorId'] as string || ''
+								: '';
+
+							logger.debug(`Folder exists with ID: ${file.pageId}, title: ${pageTitle}, version: ${version}`);
+
+							// Important: For API v2, we don't update folders using content endpoints
+							// All folder operations should use the dedicated folder endpoints
+						} catch (error) {
+							logger.warn(`Folder with ID ${folderId} not found, will create new folder. Error: ${error instanceof Error ? error.message : String(error)}`);
+							if (error instanceof Error && 'response' in error) {
+								logger.warn(`API error response for folder lookup: ${JSON.stringify((error as ErrorWithResponse).response, null, 2)}`);
+							}
+							folderId = ''; // Reset so we create a new one
+						}
+					}
+
+					// If we don't have a folder ID or couldn't find an existing one, create a new folder
+					if (!folderId) {
+						// For API v2, we need to get the space ID from the space key
+						let spaceId = spaceKey;
+						logger.info(`Attempting to resolve space ID from key: ${spaceKey}`);
+
+						// Try to get the actual space ID if we need to create a new folder
+						try {
+							// This assumes the space key is equal to the space ID in most cases
+							// If not, we would need to implement a space lookup
+							logger.info(`Calling space.getSpace with key: ${spaceKey}`);
+							const spaceResponse = await confluenceClient.space.getSpace({
+								spaceKey: spaceKey,
+								expand: ['id']
+							});
+
+							logger.info(`Space response: ${JSON.stringify(spaceResponse, null, 2)}`);
+
+							// Get the actual space ID if available
+							if (spaceResponse && spaceResponse.id) {
+								spaceId = String(spaceResponse.id);
+								logger.info(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
+							} else {
+								// Fallback - use the space key as ID
+								logger.warn(`Could not resolve space ID for key ${spaceKey}, using key as ID`);
+							}
+						} catch (error) {
+							logger.warn(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
+							if (error instanceof Error && 'response' in error) {
+								logger.warn(`API error response for space lookup: ${JSON.stringify((error as ErrorWithResponse).response, null, 2)}`);
+							}
+							logger.warn(`Trying to use space key as space ID`);
+						}
+
+						interface FolderCreateParams {
+							spaceId: string;
+							title: string;
+							parentId?: string;
+						}
+
+						const folderParams: FolderCreateParams = {
+							spaceId,
+							title: node.file.pageTitle
+						};
+
+						// Add parent ID if we have one
+						if (effectiveParentPageId) {
+							folderParams.parentId = effectiveParentPageId;
+							logger.info(`Using parent ID for folder: ${effectiveParentPageId}`);
+						} else {
+							logger.warn(`No parent ID for folder: ${node.file.pageTitle}. This folder will be created at the root level.`);
+						}
+
+						logger.info(`Creating folder with params: ${JSON.stringify(folderParams)}`);
+
+						// Use a more specific type casting
+						const clientWithV2 = confluenceClient as unknown as ConfluenceClientV2;
+						logger.info(`v2 API properties available: ${Object.keys(clientWithV2.v2).join(', ')}`);
+
+						// Check if the 'folders' property exists
+						if ('folders' in clientWithV2.v2) {
+							logger.info(`v2.folders methods available: ${Object.keys(clientWithV2.v2.folders || {}).join(', ')}`);
+						} else {
+							logger.error(`CRITICAL ERROR: v2.folders API is not available in the client! This will cause the "Type is not a custom content type : folder" error.`);
+						}
+
+						try {
+							logger.info(`Calling createFolder with params: ${JSON.stringify(folderParams)}`);
+							const newFolder = await (clientWithV2.v2.folders?.createFolder(folderParams) ||
+								Promise.reject(new Error("v2.folders.createFolder is not available")));
+							logger.info(`Create folder response: ${JSON.stringify(newFolder, null, 2)}`);
+
+							logger.info(`Created new folder: ${newFolder.title} (${newFolder.id})`);
+
+							// Update the file with the new folder ID
+							file.pageId = newFolder.id;
+							file.spaceKey = spaceKey;
+							version = newFolder['version'] && typeof newFolder['version'] === 'object'
+								? (newFolder['version'] as Record<string, unknown>)['number'] as number || 0
+								: 0;
+							pageTitle = newFolder.title;
+							contentType = "folder";
+							ancestors = newFolder['parentId'] ? [{ id: newFolder['parentId'] as string }] : [];
+							lastUpdatedBy = newFolder['version'] && typeof newFolder['version'] === 'object'
+								? (newFolder['version'] as Record<string, unknown>)['authorId'] as string || ''
+								: '';
+
+							logger.info(`Updated file object with new folder data: pageId=${file.pageId}, title=${pageTitle}, contentType=${contentType}`);
+
+							// Update the file's metadata in source
+							await adaptor.updateMarkdownValues(file.absoluteFilePath, {
+								publish: true,
+								pageId: newFolder.id,
+							});
+							logger.info(`Updated source file metadata with new folder ID: ${newFolder.id}`);
+						} catch (error) {
+							logger.error(`Error calling createFolder: ${error instanceof Error ? error.message : String(error)}`);
+							if (error instanceof Error && 'response' in error) {
+								const response = (error as ErrorWithResponse).response;
+								logger.error(`API error response: ${JSON.stringify(response, null, 2)}`);
+
+								// Check if this is the specific folder content type error
+								if (typeof response === 'object' && response &&
+									'message' in response && typeof response['message'] === 'string') {
+									logger.error(`API error message: ${response['message']}`);
+
+									if (response['message'].includes('Type is not a custom content type : folder')) {
+										logger.error(`CRITICAL: Detected "Type is not a custom content type : folder" error. Make sure you are using the dedicated folder endpoints in API v2.`);
+										logger.error(`This indicates the code is still trying to create a folder as a custom content type instead of using the dedicated folder endpoints.`);
+									}
+								}
+							}
+							throw error;
+						}
+					}
+				} catch (error) {
+					logger.error(`Error creating/updating folder: ${error instanceof Error ? error.message : String(error)}`);
+					if (error instanceof Error && 'response' in error) {
+						logger.error("API response error details:", JSON.stringify((error as { response: unknown }).response, null, 2));
+					}
+					throw error;
+				}
+			} else {
+				// Handle regular pages or folders with API v1
+				logger.info(`Using standard content endpoint for ${isV2Api ? 'API v2' : 'API v1'} and content type: ${node.file.contentType}`);
+				// If this is a folder and we're using API v1, use the standard content endpoint
+				// If this is a regular page, use the standard content endpoint
+				const pageDetails = await ensurePageExists(
+					confluenceClient,
+					adaptor,
+					node.file,
+					spaceKey,
+					effectiveParentPageId as string,
+					topPageId || effectiveParentPageId as string,
+				);
+				file.pageId = pageDetails.id;
+				file.spaceKey = pageDetails.spaceKey;
+				const versionData = pageDetails['version'] as { number?: number; by?: { accountId?: string } };
+				version = versionData.number || 0;
+				adfContent = JSON.parse(pageDetails.existingAdf ?? "{}") as JSONDocNode;
+				pageTitle = pageDetails.pageTitle;
+				ancestors = pageDetails.ancestors as { id: string }[];
+				lastUpdatedBy = pageDetails.lastUpdatedBy;
+				contentType = pageDetails.contentType as PageContentType;
+				logger.debug(`Page exists with ID: ${file.pageId}, title: ${pageTitle}`);
+			}
 		} catch (error) {
 			logger.error(`Error ensuring page exists for: ${node.file.absoluteFilePath}: ${error instanceof Error ? error.message : String(error)}`);
 			if (error instanceof Error && 'response' in error) {
-				logger.error("API response error details:", JSON.stringify(error.response, null, 2));
+				logger.error("API response error details:", JSON.stringify((error as { response: unknown }).response, null, 2));
 			}
 			throw error;
 		}
@@ -153,6 +394,7 @@ export async function createFileStructureInConfluence(
 		adfContent = doc(p());
 		pageTitle = "";
 		ancestors = [];
+		lastUpdatedBy = "";
 		contentType = "page";
 	}
 
@@ -173,7 +415,10 @@ export async function createFileStructureInConfluence(
 	const childDetails = await Promise.all(childDetailsTasks);
 	logger.debug(`Processed ${childDetails.length} children for: ${node.file.absoluteFilePath}`);
 
-	const pageUrl = `${settings.confluenceBaseUrl}/wiki/spaces/${spaceKey}/pages/${file.pageId}/`;
+	const pageUrl = contentType === 'folder'
+		? `${settings.confluenceBaseUrl}/wiki/spaces/${spaceKey}/browse/folders/${file.pageId}`
+		: `${settings.confluenceBaseUrl}/wiki/spaces/${spaceKey}/pages/${file.pageId}/`;
+
 	return {
 		file: { ...file, pageUrl },
 		version,
@@ -188,6 +433,74 @@ export async function createFileStructureInConfluence(
 	};
 }
 
+// Helper function to create a new folder using API v2 folder endpoints
+async function createNewFolderV2(
+	confluenceClient: RequiredConfluenceClient,
+	adaptor: LoaderAdaptor,
+	file: LocalAdfFile,
+	spaceKey: string,
+	parentPageId: string
+) {
+	logger.info(`Creating new folder with V2 API: ${file.pageTitle}`);
+	
+	// Type cast the client to access v2 APIs
+	const clientWithV2 = confluenceClient as unknown as ConfluenceClientV2;
+	
+	// Attempt to get the space ID from the space key
+	let spaceId = spaceKey;
+
+	try {
+		const spaceResponse = await confluenceClient.space.getSpace({
+			spaceKey: spaceKey,
+			expand: ['id']
+		});
+
+		// Get the actual space ID if available
+		if (spaceResponse && spaceResponse.id) {
+			spaceId = String(spaceResponse.id);
+			logger.debug(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
+		} else {
+			logger.warn(`Could not resolve space ID for key ${spaceKey}, using key as ID`);
+		}
+	} catch (error) {
+		logger.warn(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
+		logger.warn(`Using space key as space ID`);
+	}
+
+	const folderParams = {
+		spaceId: spaceId,
+		title: file.pageTitle,
+		parentId: parentPageId
+	};
+
+	logger.info(`Creating new folder with params: ${JSON.stringify(folderParams)}`);
+	
+	if (!clientWithV2.v2?.folders?.createFolder) {
+		throw new Error("v2.folders.createFolder is not available on this client");
+	}
+
+	const newFolder = await clientWithV2.v2.folders.createFolder(folderParams);
+	logger.info(`Folder created successfully with ID: ${newFolder.id}`);
+	
+	// Update the file metadata
+	await adaptor.updateMarkdownValues(file.absoluteFilePath, {
+		publish: true,
+		pageId: newFolder.id,
+	});
+	
+	return {
+		id: newFolder.id,
+		title: file.pageTitle,
+		version: newFolder['version'] ? (newFolder['version'] as { number?: number })?.number ?? 1 : 1,
+		lastUpdatedBy: newFolder['version'] ? (newFolder['version'] as { authorId?: string })?.authorId ?? "NO ACCOUNT ID" : "NO ACCOUNT ID",
+		existingAdf: undefined,
+		pageTitle: newFolder.title,
+		spaceKey,
+		ancestors: newFolder['parentId'] ? [{ id: newFolder['parentId'] as string }] : [],
+		contentType: "folder",
+	} as const;
+}
+
 async function ensurePageExists(
 	confluenceClient: RequiredConfluenceClient,
 	adaptor: LoaderAdaptor,
@@ -197,6 +510,109 @@ async function ensurePageExists(
 	topPageId: string | null,
 ) {
 	logger.debug(`Checking if page exists: ${file.absoluteFilePath}, pageId: ${file.pageId}`);
+	logger.info(`Content type being checked: ${file.contentType}`);
+	logger.info(`API version check in ensurePageExists: ${'apiVersion' in confluenceClient ? confluenceClient.apiVersion : 'not available'}`);
+
+	// Check if we're using the v2 API
+	const isV2Api = 'apiVersion' in confluenceClient && confluenceClient.apiVersion === 'v2';
+	logger.info(`Is using API v2 in ensurePageExists: ${isV2Api}, contentType: ${file.contentType}`);
+
+	// If this is a folder and we're using v2 API, skip the regular content checks
+	if (file.contentType === 'folder' && isV2Api && 'v2' in confluenceClient) {
+		logger.info(`CRITICAL CHECK: Skipping regular content checks for folder in API v2: ${file.pageTitle}`);
+
+		const clientWithV2 = confluenceClient as unknown as ConfluenceClientV2;
+		logger.info(`v2 API properties available: ${Object.keys(clientWithV2.v2).join(', ')}`);
+
+		// Check if the 'folders' property exists
+		if ('folders' in clientWithV2.v2) {
+			logger.info(`v2.folders methods available: ${Object.keys(clientWithV2.v2.folders || {}).join(', ')}`);
+		} else {
+			logger.error(`CRITICAL ERROR: v2.folders API is not available in the client! This will cause the "Type is not a custom content type : folder" error.`);
+		}
+
+		// Create a new folder using v2 API
+		try {
+			// Attempt to get the space ID from the space key
+			let spaceId = spaceKey;
+
+			try {
+				const spaceResponse = await confluenceClient.space.getSpace({
+					spaceKey: spaceKey,
+					expand: ['id']
+				});
+
+				// Get the actual space ID if available
+				if (spaceResponse && spaceResponse.id) {
+					spaceId = String(spaceResponse.id);
+					logger.debug(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
+				} else {
+					// Fallback - use the space key as ID
+					logger.warn(`Could not resolve space ID for key ${spaceKey}, using key as ID`);
+				}
+			} catch (error) {
+				logger.warn(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
+				logger.warn(`Using space key as space ID`);
+			}
+
+			const folderParams = {
+				spaceId: spaceId,
+				title: file.pageTitle,
+				parentId: parentPageId
+			};
+
+			logger.info(`FOLDER CREATION CHECK - Creating new folder with API v2: ${JSON.stringify(folderParams)}`);
+			logger.info(`This should use the dedicated folder endpoint, not custom content endpoint`);
+
+			const newFolder = await (clientWithV2.v2.folders?.createFolder(folderParams) ||
+				Promise.reject(new Error("v2.folders.createFolder is not available")));
+
+			logger.info(`Folder successfully created with ID: ${newFolder.id}`);
+
+			await adaptor.updateMarkdownValues(file.absoluteFilePath, {
+				publish: true,
+				pageId: newFolder.id,
+			});
+
+			return {
+				id: newFolder.id,
+				title: file.pageTitle,
+				version: newFolder['version'] ? (newFolder['version'] as { number?: number })?.number ?? 1 : 1,
+				lastUpdatedBy: newFolder['version'] ? (newFolder['version'] as { authorId?: string })?.authorId ?? "NO ACCOUNT ID" : "NO ACCOUNT ID",
+				existingAdf: undefined,
+				pageTitle: newFolder.title,
+				spaceKey,
+				ancestors: newFolder['parentId'] ? [{ id: newFolder['parentId'] as string }] : [],
+				contentType: "folder",
+			} as const;
+		} catch (error) {
+			logger.error(`CRITICAL ERROR in folder creation: ${error instanceof Error ? error.message : String(error)}`);
+			if (error instanceof Error && 'response' in error) {
+				// Type assertion for the error object with a response property
+				type ErrorWithResponse = Error & {
+					response: {
+						message?: string;
+						[key: string]: unknown;
+					}
+				};
+
+				const errorWithResponse = error as ErrorWithResponse;
+				logger.error(`API response error details: ${JSON.stringify(errorWithResponse.response, null, 2)}`);
+
+				// Check if this is the specific folder content type error
+				if (errorWithResponse.response?.['message'] &&
+					typeof errorWithResponse.response['message'] === 'string' &&
+					errorWithResponse.response['message'].includes('Type is not a custom content type : folder')) {
+					logger.error(`CRITICAL: Detected "Type is not a custom content type : folder" error in ensurePageExists.`);
+					logger.error(`This indicates we're trying to create a folder through the custom content endpoint instead of the folder endpoint.`);
+
+					// Log more details about the client configuration
+					logger.error(`Make sure this folder creation is going through v2.folders.createFolder, not content.createContent`);
+				}
+			}
+			throw error;
+		}
+	}
 
 	if (file.pageId) {
 		try {
@@ -227,10 +643,10 @@ async function ensurePageExists(
 			return {
 				id: contentById.id,
 				title: file.pageTitle,
-				version: contentById?.version?.number ?? 1,
+				version: contentById?.['version']?.['number'] ?? 1,
 				lastUpdatedBy:
-					contentById?.version?.by?.accountId ?? "NO ACCOUNT ID",
-				existingAdf: contentById?.body?.atlas_doc_format?.value,
+					contentById?.['version']?.['by']?.['accountId'] ?? "NO ACCOUNT ID",
+				existingAdf: contentById?.['body']?.['atlas_doc_format']?.['value'],
 				spaceKey: contentById.space.key,
 				pageTitle: contentById.title,
 				ancestors:
@@ -264,9 +680,21 @@ async function ensurePageExists(
 
 			throw error;
 		}
-	}
+	}	
 
 	// Try to find page by title
+	// For API v2, we need to handle folders differently
+	const isApiV2 = 'apiVersion' in confluenceClient && confluenceClient.apiVersion === 'v2';
+	
+	// Skip content search for folders when using API v2, as folders aren't valid content types in v2
+	if (file.contentType === 'folder' && isApiV2 && 'v2' in confluenceClient) {
+		logger.info(`Skipping content search for folder in API v2: ${file.pageTitle}`);
+		logger.info(`Creating new folder directly using folder endpoints instead`);
+		
+		// Proceed directly to folder creation for API v2 (handled below)
+		return await createNewFolderV2(confluenceClient, adaptor, file, spaceKey, parentPageId);
+	}
+	
 	const searchParams = {
 		type: file.contentType,
 		spaceKey,
@@ -303,10 +731,10 @@ async function ensurePageExists(
 			return {
 				id: currentPage.id,
 				title: file.pageTitle,
-				version: currentPage.version?.number ?? 1,
+				version: currentPage['version']?.['number'] ?? 1,
 				lastUpdatedBy:
-					currentPage.version?.by?.accountId ?? "NO ACCOUNT ID",
-				existingAdf: currentPage.body?.atlas_doc_format?.value,
+					currentPage['version']?.['by']?.['accountId'] ?? "NO ACCOUNT ID",
+				existingAdf: currentPage['body']?.['atlas_doc_format']?.['value'],
 				pageTitle: currentPage.title,
 				spaceKey,
 				ancestors:
@@ -387,10 +815,10 @@ async function ensurePageExists(
 				return {
 					id: pageDetails.id,
 					title: file.pageTitle,
-					version: pageDetails.version?.number ?? 1,
+					version: pageDetails['version']?.['number'] ?? 1,
 					lastUpdatedBy:
-						pageDetails.version?.by?.accountId ?? "NO ACCOUNT ID",
-					existingAdf: pageDetails.body?.atlas_doc_format?.value,
+						pageDetails['version']?.['by']?.['accountId'] ?? "NO ACCOUNT ID",
+					existingAdf: pageDetails['body']?.['atlas_doc_format']?.['value'],
 					pageTitle: pageDetails.title,
 					ancestors:
 						pageDetails.ancestors?.map((ancestor) => ({

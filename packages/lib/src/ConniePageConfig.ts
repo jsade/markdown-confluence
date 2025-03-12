@@ -3,7 +3,7 @@ import { MarkdownFile } from "./adaptors";
 import { parseMarkdownToADF } from "./MdToADF";
 import { ConfluenceSettings } from "./Settings";
 
-export type PageContentType = "page" | "blogpost";
+export type PageContentType = "page" | "blogpost" | "folder";
 
 export type ConfluencePerPageConfig = {
 	publish: FrontmatterConfig<boolean, "boolean">;
@@ -324,7 +324,7 @@ export const conniePerPageConfig: ConfluencePerPageConfig = {
 		default: "page",
 		alwaysProcess: true,
 		inputType: "options",
-		selectOptions: ["page", "blogpost"],
+		selectOptions: ["page", "blogpost", "folder"],
 		inputValidator: () => {
 			return {
 				valid: true,
@@ -338,10 +338,10 @@ export const conniePerPageConfig: ConfluencePerPageConfig = {
 
 			if (
 				typeof yamlValue === "string" &&
-				!["page", "blogpost"].includes(yamlValue)
+				!["page", "blogpost", "folder"].includes(yamlValue)
 			) {
 				return Error(
-					`Provided "connie-content-type" isn't "page" or "blogpost".`,
+					`Provided "connie-content-type" isn't "page", "blogpost", or "folder".`,
 				);
 			}
 
@@ -362,7 +362,7 @@ export const conniePerPageConfig: ConfluencePerPageConfig = {
 
 			if (
 				yamlValue !== undefined &&
-				["page", "blogpost"].includes(yamlValue)
+				["page", "blogpost", "folder"].includes(yamlValue)
 			) {
 				contentType = yamlValue as PageContentType;
 			}
