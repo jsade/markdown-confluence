@@ -1,3 +1,7 @@
+import { doc, p } from "@atlaskit/adf-utils/builders";
+import { JSONDocNode } from "@atlaskit/editor-json-transformer";
+import { LoaderAdaptor, RequiredConfluenceClient } from "./adaptors";
+import { prepareAdfToUpload } from "./AdfProcessing";
 import {
 	ConfluenceAdfFile,
 	ConfluenceNode,
@@ -5,10 +9,6 @@ import {
 	LocalAdfFile,
 	LocalAdfFileTreeNode,
 } from "./Publisher";
-import { doc, p } from "@atlaskit/adf-utils/builders";
-import { RequiredConfluenceClient, LoaderAdaptor } from "./adaptors";
-import { JSONDocNode } from "@atlaskit/editor-json-transformer";
-import { prepareAdfToUpload } from "./AdfProcessing";
 import { ConfluenceSettings } from "./Settings";
 
 const blankPageAdf: string = JSON.stringify(doc(p("Page not published yet")));
@@ -66,7 +66,7 @@ export async function ensureAllFilesExistInConfluence(
 	return pages;
 }
 
-async function createFileStructureInConfluence(
+export async function createFileStructureInConfluence(
 	settings: ConfluenceSettings,
 	confluenceClient: RequiredConfluenceClient,
 	adaptor: LoaderAdaptor,
@@ -74,7 +74,7 @@ async function createFileStructureInConfluence(
 	spaceKey: string,
 	parentPageId: string,
 	topPageId: string,
-	createPage: boolean,
+	createPage = true,
 ): Promise<ConfluenceTreeNode> {
 	if (!node.file) {
 		throw new Error("Missing file on node");
@@ -93,13 +93,16 @@ async function createFileStructureInConfluence(
 		pageUrl: "",
 	};
 
+	// Use the parentPageId from the file if available (for frontmatter mode)
+	const effectiveParentPageId = node.file.parentPageId || parentPageId;
+
 	if (createPage) {
 		const pageDetails = await ensurePageExists(
 			confluenceClient,
 			adaptor,
 			node.file,
 			spaceKey,
-			parentPageId,
+			effectiveParentPageId,
 			topPageId,
 		);
 		file.pageId = pageDetails.id;

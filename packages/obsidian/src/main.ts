@@ -3,9 +3,8 @@ import {
 	ConfluenceUploadSettings,
 	MermaidRendererPlugin,
 	Publisher,
-	StaticSettingsLoader,
-	UploadAdfFileResult,
-	renderADFDoc,
+	SettingsLoader,
+	UploadAdfFileResult
 } from "@markdown-confluence/lib";
 import { ElectronMermaidRenderer } from "@markdown-confluence/mermaid-electron-renderer";
 import { Mermaid } from "mermaid";
@@ -33,6 +32,7 @@ export interface ObsidianPluginSettings
 	| "dark"
 	| "forest";
 	logLevel: LogLevel;
+	publishingMode: "legacy" | "frontmatter";
 }
 
 interface FailedFile {
@@ -44,6 +44,23 @@ interface UploadResults {
 	errorMessage: string | null;
 	failedFiles: FailedFile[];
 	filesUploadResult: UploadAdfFileResult[];
+}
+
+class ObsidianSettingsLoader extends SettingsLoader {
+	private settings: ObsidianPluginSettings;
+
+	constructor(settings: ObsidianPluginSettings) {
+		super();
+		this.settings = settings;
+	}
+
+	override load() {
+		return this.settings;
+	}
+
+	override loadPartial() {
+		return this.settings;
+	}
 }
 
 export default class ConfluencePlugin extends Plugin {
@@ -64,61 +81,56 @@ export default class ConfluencePlugin extends Plugin {
 	}
 
 	async init() {
-		this.logger.info("Initializing Confluence plugin");
-		try {
-			await this.loadSettings();
-			const { vault, metadataCache, workspace } = this.app;
-			this.workspace = workspace;
-			this.adaptor = new ObsidianAdaptor(
-				vault,
-				metadataCache,
-				this.settings,
-				this.app,
-			);
+		this.logger.debug("Initializing plugin");
+		await this.loadSettings();
 
-			const mermaidItems = await this.getMermaidItems();
-			const mermaidRenderer = new ElectronMermaidRenderer(
-				mermaidItems.extraStyleSheets,
-				mermaidItems.extraStyles,
-				mermaidItems.mermaidConfig,
-				mermaidItems.bodyStyles,
-			);
-			const confluenceClient = new ObsidianConfluenceClient({
-				host: this.settings.confluenceBaseUrl,
+		this.logger.updateOptions({
+			minLevel: this.settings.logLevel
+		});
+
+		this.logger.info(`Initializing with publishing mode: ${this.settings.publishingMode}`);
+		if (this.settings.publishingMode === "frontmatter") {
+			this.logger.info("Using Frontmatter mode - Content will be published based on PSF Folder Notes with connie-parent-page-id");
+		} else {
+			this.logger.info(`Using Legacy mode - Publishing from folder: ${this.settings.folderToPublish} to parent page ID: ${this.settings.confluenceParentId}`);
+		}
+
+		this.adaptor = new ObsidianAdaptor(
+			this.app.vault,
+			this.app.metadataCache,
+			this.settings,
+			this.app
+		);
+
+		// Create a logger adapter for the lib package
+		const libLogger = new ObsidianLoggerAdapter(this.logger);
+
+		// Create a settings loader with the current settings
+		const settingsLoader = new ObsidianSettingsLoader(this.settings);
+
+		this.publisher = new Publisher(
+			this.adaptor,
+			settingsLoader,
+			new ObsidianConfluenceClient({
+				host: this.settings.confluenceBaseUrl || '',
 				authentication: {
 					basic: {
-						email: this.settings.atlassianUserName,
-						apiToken: this.settings.atlassianApiToken,
-					},
-				},
-				middlewares: {
-					onError: (e) => {
-						this.logger.error(`Error in plugin init: ${e.message}`, e);
-						if ("response" in e && "data" in e.response) {
-							e.message =
-								typeof e.response.data === "string"
-									? e.response.data
-									: JSON.stringify(e.response.data);
-						}
-					},
-				},
-			});
+						email: this.settings.atlassianUserName || '',
+						apiToken: this.settings.atlassianApiToken || ''
+					}
+				}
+			}),
+			[new MermaidRendererPlugin(new ElectronMermaidRenderer(
+				[], // extraStyleSheets
+				[], // extraStyles
+				{ theme: this.settings.mermaidTheme } // mermaidConfig
+			))],
+			libLogger
+		);
 
-			const settingsLoader = new StaticSettingsLoader(this.settings);
-			const loggerAdapter = new ObsidianLoggerAdapter(this.logger);
-			this.publisher = new Publisher(
-				this.adaptor,
-				settingsLoader,
-				confluenceClient,
-				[new MermaidRendererPlugin(mermaidRenderer)],
-				loggerAdapter
-			);
-
-			this.logger.info("Confluence plugin initialized successfully");
-		} catch (error) {
-			this.logger.error("Failed to initialize Confluence plugin", error);
-			throw error;
-		}
+		this.logger.debug("Plugin initialized", {
+			publishingMode: this.settings.publishingMode
+		});
 	}
 
 	async getMermaidItems() {
@@ -196,6 +208,13 @@ export default class ConfluencePlugin extends Plugin {
 	async doPublish(publishFilter?: string): Promise<UploadResults> {
 		this.logger.info("Starting publication process", { publishFilter });
 
+		// Show notice about publishing mode
+		if (this.settings.publishingMode === "frontmatter") {
+			new Notice("Publishing using Frontmatter mode - Using PSF Folder Notes with connie-parent-page-id");
+		} else {
+			new Notice(`Publishing using Legacy mode - From folder: ${this.settings.folderToPublish}`);
+		}
+
 		try {
 			const adrFiles = await this.publisher.publish(publishFilter);
 
@@ -233,75 +252,40 @@ export default class ConfluencePlugin extends Plugin {
 
 	override async onload() {
 		this.logger.info("Loading Confluence plugin");
-
 		await this.init();
 
-		this.addRibbonIcon("cloud", "Publish to Confluence", async () => {
-			if (this.isSyncing) {
-				new Notice("Syncing already on going");
-				return;
-			}
-			this.isSyncing = true;
-			try {
-				const stats = await this.doPublish();
-				new CompletedModal(this.app, {
-					uploadResults: stats,
-				}).open();
-			} catch (error) {
-				if (error instanceof Error) {
-					new CompletedModal(this.app, {
-						uploadResults: {
-							errorMessage: error.message,
-							failedFiles: [],
-							filesUploadResult: [],
-						},
-					}).open();
-				} else {
-					new CompletedModal(this.app, {
-						uploadResults: {
-							errorMessage: JSON.stringify(error),
-							failedFiles: [],
-							filesUploadResult: [],
-						},
-					}).open();
-				}
-			} finally {
-				this.isSyncing = false;
-			}
-		});
+		// Add ribbon icon for Confluence Publish
+		this.addRibbonIcon(
+			"cloud",
+			"Publish All to Confluence",
+			async () => {
+				await this.publishAllToConfluence();
+			},
+		);
 
+		// Add command to publish all notes
 		this.addCommand({
-			id: "adf-to-markdown",
-			name: "ADF To Markdown",
+			id: "publish-all-to-confluence",
+			name: "Publish All to Confluence",
+			hotkeys: [],
 			callback: async () => {
-				this.logger.debug("Starting ADF to Markdown conversion");
-				const json = JSON.parse(
-					'{"type":"doc","content":[{"type":"paragraph","content":[{"text":"Testing","type":"text"}]}],"version":1}',
-				);
-				this.logger.debug("Parsed JSON", { json });
-
-				const confluenceClient = new ObsidianConfluenceClient({
-					host: this.settings.confluenceBaseUrl,
-					authentication: {
-						basic: {
-							email: this.settings.atlassianUserName,
-							apiToken: this.settings.atlassianApiToken,
-						},
-					},
-				});
-				const testingPage =
-					await confluenceClient.content.getContentById({
-						id: "9732097",
-						expand: ["body.atlas_doc_format", "space"],
-					});
-				const adf = JSON.parse(
-					testingPage.body?.atlas_doc_format?.value ||
-					'{type: "doc", content:[]}',
-				);
-				renderADFDoc(adf);
+				await this.publishAllToConfluence();
 			},
 		});
 
+		// Add command to test PSF detection in frontmatter mode
+		if (this.settings.publishingMode === "frontmatter") {
+			this.addCommand({
+				id: "test-psf-detection",
+				name: "Debug: Test PSF Detection",
+				hotkeys: [],
+				callback: async () => {
+					await this.testPSFDetection();
+				},
+			});
+		}
+
+		// Add command to publish open file
 		this.addCommand({
 			id: "publish-current",
 			name: "Publish Current File to Confluence",
@@ -339,47 +323,6 @@ export default class ConfluencePlugin extends Plugin {
 							});
 					}
 					return true;
-				}
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: "publish-all",
-			name: "Publish All to Confluence",
-			checkCallback: (checking: boolean) => {
-				if (!this.isSyncing) {
-					if (!checking) {
-						this.isSyncing = true;
-						this.doPublish()
-							.then((stats) => {
-								new CompletedModal(this.app, {
-									uploadResults: stats,
-								}).open();
-							})
-							.catch((error) => {
-								if (error instanceof Error) {
-									new CompletedModal(this.app, {
-										uploadResults: {
-											errorMessage: error.message,
-											failedFiles: [],
-											filesUploadResult: [],
-										},
-									}).open();
-								} else {
-									new CompletedModal(this.app, {
-										uploadResults: {
-											errorMessage: JSON.stringify(error),
-											failedFiles: [],
-											filesUploadResult: [],
-										},
-									}).open();
-								}
-							})
-							.finally(() => {
-								this.isSyncing = false;
-							});
-					}
 				}
 				return true;
 			},
@@ -529,18 +472,36 @@ export default class ConfluencePlugin extends Plugin {
 		this.settings = Object.assign(
 			{
 				...ConfluenceUploadSettings.DEFAULT_SETTINGS,
+				atlassianApiToken: '',
+				atlassianUserName: '',
+				confluenceBaseUrl: '',
+				confluenceParentId: '',
+				rootPage: '',
+				spaceKey: '',
+				skipImages: false,
+				debugMode: false,
+				updateExistingImages: false,
 				mermaidTheme: "match-obsidian",
 				logLevel: LogLevel.SILENT,
+				publishingMode: "legacy",
 			},
-			await this.loadData(),
+			await this.loadData()
 		);
+
+		// Ensure publishingMode is set to a valid value
+		if (!this.settings.publishingMode || !["legacy", "frontmatter"].includes(this.settings.publishingMode)) {
+			this.logger.debug("Invalid or missing publishingMode, setting to legacy");
+			this.settings.publishingMode = "legacy";
+		}
 
 		if (this.logger) {
 			this.logger.updateOptions({
 				minLevel: this.settings.logLevel as LogLevel
 			});
 		}
-		this.logger.debug("Settings loaded successfully");
+		this.logger.debug("Settings loaded successfully", {
+			mode: this.settings.publishingMode
+		});
 	}
 
 	async saveSettings() {
@@ -548,5 +509,80 @@ export default class ConfluencePlugin extends Plugin {
 		await this.saveData(this.settings);
 		await this.init();
 		this.logger.debug("Settings saved successfully");
+	}
+
+	async testPSFDetection() {
+		this.logger.info("Testing PSF detection in frontmatter mode");
+
+		if (this.settings.publishingMode !== "frontmatter") {
+			new Notice("This command only works in Frontmatter Mode. Please change your Publishing Mode in settings.");
+			return;
+		}
+
+		try {
+			// Get PSFs
+			const psfMap = await this.adaptor.findPSFsByFrontmatter();
+
+			if (psfMap.size === 0) {
+				new Notice("No PSFs found. Make sure you have Folder Notes with connie-parent-page-id frontmatter.");
+				return;
+			}
+
+			// Show results in notice
+			new Notice(`Found ${psfMap.size} PSFs. Check console for details.`);
+
+			// Log detailed results
+			this.logger.info(`Found ${psfMap.size} PSFs:`);
+			for (const [folderPath, parentPageId] of psfMap.entries()) {
+				this.logger.info(`- PSF: ${folderPath} -> Target Page ID: ${parentPageId}`);
+			}
+
+			// Get files that would be published
+			const filesToUpload = await this.adaptor.getMarkdownFilesToUpload();
+			this.logger.info(`Would publish ${filesToUpload.length} files:`);
+
+			for (const file of filesToUpload) {
+				const parentId = file.frontmatter["connie-parent-page-id"];
+				this.logger.info(`- File: ${file.absoluteFilePath} -> Target Parent ID: ${parentId}`);
+			}
+		} catch (error) {
+			this.logger.error("Error testing PSF detection:", error);
+			new Notice(`Error testing PSF detection: ${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	async publishAllToConfluence() {
+		if (this.isSyncing) {
+			new Notice("Publishing already in progress");
+			return;
+		}
+
+		this.isSyncing = true;
+		try {
+			const stats = await this.doPublish();
+			new CompletedModal(this.app, {
+				uploadResults: stats,
+			}).open();
+		} catch (error) {
+			if (error instanceof Error) {
+				new CompletedModal(this.app, {
+					uploadResults: {
+						errorMessage: error.message,
+						failedFiles: [],
+						filesUploadResult: [],
+					},
+				}).open();
+			} else {
+				new CompletedModal(this.app, {
+					uploadResults: {
+						errorMessage: JSON.stringify(error),
+						failedFiles: [],
+						filesUploadResult: [],
+					},
+				}).open();
+			}
+		} finally {
+			this.isSyncing = false;
+		}
 	}
 }

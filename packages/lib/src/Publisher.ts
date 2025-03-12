@@ -38,6 +38,7 @@ export interface LocalAdfFile {
 	};
 	tags: string[];
 	pageId: string | undefined;
+	parentPageId?: string | undefined;
 	dontChangeParentPageId: boolean;
 	contentType: PageContentType;
 	blogPostDate: string | undefined;
@@ -126,15 +127,59 @@ export class Publisher {
 			this.myAccountId = currentUser.accountId;
 		}
 
-		const parentPage = await this.confluenceClient.content.getContentById({
-			id: settings.confluenceParentId,
-			expand: ["body.atlas_doc_format", "space"],
-		});
-		if (!parentPage.space) {
-			throw new Error("Missing Space Key");
-		}
+		// In legacy mode, use the global parent page ID
+		// In frontmatter mode, parentPageId will be set per file in the adaptor
+		const parentPageId = settings.confluenceParentId;
 
-		const spaceToPublishTo = parentPage.space;
+		// Only fetch parent page info in legacy mode
+		let spaceToPublishTo;
+		if (!settings.publishingMode || settings.publishingMode === "legacy") {
+			const parentPage = await this.confluenceClient.content.getContentById({
+				id: parentPageId,
+				expand: ["body.atlas_doc_format", "space"],
+			});
+			if (!parentPage.space) {
+				throw new Error("Missing Space Key");
+			}
+			spaceToPublishTo = parentPage.space;
+		} else {
+			// In frontmatter mode, we need to find a valid page to get the space
+			// First try to use the parentPageId if it exists
+			try {
+				if (parentPageId) {
+					const parentPage = await this.confluenceClient.content.getContentById({
+						id: parentPageId,
+						expand: ["space"],
+					});
+					if (parentPage.space) {
+						spaceToPublishTo = parentPage.space;
+					}
+				}
+			} catch (error) {
+				this.logger.warn("Could not fetch parent page in frontmatter mode, trying to get space from any page");
+			}
+
+			// If we still don't have a space, try to get it from any page
+			if (!spaceToPublishTo) {
+				try {
+					// Try to get the space from the first content we can find
+					const content = await this.confluenceClient.content.getContent({
+						limit: 1,
+						expand: ["space"],
+					});
+
+					if (content.results &&
+						content.results.length > 0 &&
+						content.results[0]?.space) {
+						spaceToPublishTo = content.results[0]?.space;
+					} else {
+						throw new Error("Could not determine space to publish to");
+					}
+				} catch (error) {
+					throw new Error("Could not determine space to publish to: " + (error instanceof Error ? error.message : String(error)));
+				}
+			}
+		}
 
 		const files = await this.adaptor.getMarkdownFilesToUpload();
 		const folderTree = createLocalAdfTree(files, settings);
@@ -143,8 +188,8 @@ export class Publisher {
 			this.adaptor,
 			folderTree,
 			spaceToPublishTo.key,
-			parentPage.id,
-			parentPage.id,
+			parentPageId,
+			parentPageId,
 			settings,
 		);
 
@@ -281,7 +326,7 @@ export class Publisher {
 			title: existingPageData.pageTitle,
 			type: existingPageData.contentType,
 			...(adfFile.contentType === "blogpost" ||
-			adfFile.dontChangeParentPageId
+				adfFile.dontChangeParentPageId
 				? {}
 				: { ancestors: existingPageData.ancestors }),
 		};
@@ -290,13 +335,13 @@ export class Publisher {
 			title: adfFile.pageTitle,
 			type: adfFile.contentType,
 			...(adfFile.contentType === "blogpost" ||
-			adfFile.dontChangeParentPageId
+				adfFile.dontChangeParentPageId
 				? {}
 				: {
-						ancestors: ancestors.map((ancestor) => ({
-							id: ancestor,
-						})),
-				  }),
+					ancestors: ancestors.map((ancestor) => ({
+						id: ancestor,
+					})),
+				}),
 		};
 
 		if (

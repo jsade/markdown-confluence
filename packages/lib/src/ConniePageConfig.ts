@@ -1,7 +1,7 @@
 import { JSONDocNode } from "@atlaskit/editor-json-transformer";
-import { ConfluenceSettings } from "./Settings";
 import { MarkdownFile } from "./adaptors";
 import { parseMarkdownToADF } from "./MdToADF";
+import { ConfluenceSettings } from "./Settings";
 
 export type PageContentType = "page" | "blogpost";
 
@@ -11,6 +11,7 @@ export type ConfluencePerPageConfig = {
 	frontmatterToPublish: FrontmatterConfig<string[], "array-text">;
 	tags: FrontmatterConfig<string[], "array-text">;
 	pageId: FrontmatterConfig<string | undefined, "text">;
+	parentPageId: FrontmatterConfig<string | undefined, "text">;
 	dontChangeParentPageId: FrontmatterConfig<boolean, "boolean">;
 	blogPostDate: FrontmatterConfig<string | undefined, "text">;
 	contentType: FrontmatterConfig<PageContentType, "options">;
@@ -113,7 +114,7 @@ export const conniePerPageConfig: ConfluencePerPageConfig = {
 				adfContent.content.at(0)?.type === "heading" &&
 				adfContent.content.at(0)?.content?.at(0)?.type === "text" &&
 				typeof adfContent.content.at(0)?.content?.at(0)?.text ===
-					"string"
+				"string"
 			) {
 				// Get the first heading text content
 				const firstHeadingText = adfContent.content
@@ -201,7 +202,10 @@ export const conniePerPageConfig: ConfluencePerPageConfig = {
 		inputType: "text",
 		inputValidator: (value) => {
 			const digitRegex = /^\d+$/;
-			if (typeof value === "string" && digitRegex.test(value)) {
+			if (
+				(typeof value === "string" && digitRegex.test(value)) ||
+				value === undefined
+			) {
 				return { valid: true, errors: [] };
 			}
 			return {
@@ -209,6 +213,37 @@ export const conniePerPageConfig: ConfluencePerPageConfig = {
 				errors: [
 					new Error(
 						"Page ID needs to be a string and only can contain numbers",
+					),
+				],
+			};
+		},
+		process: (yamlValue) => {
+			let pageId: string | undefined;
+			switch (typeof yamlValue) {
+				case "string":
+				case "number":
+					pageId = yamlValue.toString();
+					break;
+				default:
+					pageId = undefined;
+			}
+			return pageId;
+		},
+	},
+	parentPageId: {
+		key: "connie-parent-page-id",
+		default: undefined,
+		inputType: "text",
+		inputValidator: (value) => {
+			const digitRegex = /^\d+$/;
+			if (typeof value === "string" && digitRegex.test(value)) {
+				return { valid: true, errors: [] };
+			}
+			return {
+				valid: false,
+				errors: [
+					new Error(
+						"Parent Page ID needs to be a string and only can contain numbers",
 					),
 				],
 			};

@@ -67,67 +67,94 @@ export class ConfluenceSettingTab extends PluginSettingTab {
 		containerEl.createEl("h2", { text: "Publishing" });
 
 		new Setting(containerEl)
-			.setName("Confluence Parent Page ID")
-			.setDesc("Page ID under which your content will be published")
-			.addText((text) =>
-				text
-					.setPlaceholder("23232345645")
-					.setValue(this.plugin.settings.confluenceParentId)
+			.setName("Publishing Mode")
+			.setDesc("Choose how to specify which content to publish")
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({
+						"legacy": "Legacy Mode (Single folder)",
+						"frontmatter": "Frontmatter Mode (Multiple folders)"
+					})
+					.setValue(this.plugin.settings.publishingMode || "legacy")
 					.onChange(async (value) => {
-						this.plugin.settings.confluenceParentId = value;
+						this.plugin.settings.publishingMode = value as "legacy" | "frontmatter";
 						await this.plugin.saveSettings();
+						// Refresh UI to show/hide relevant settings
+						this.display();
 					}),
 			);
 
-		const folderSetting = new Setting(containerEl)
-			.setName("Folder to publish")
-			.setDesc(
-				"Specify the folder containing files to publish. Files can be excluded using YAML frontmatter."
-			)
-			.addText((text) => {
-				const textComponent = text
-					.setPlaceholder("my-confluence-content")
-					.setValue(this.plugin.settings.folderToPublish)
-					.onChange(async (value) => {
-						// Check if folder exists
-						const folderExists = this.app.vault.getAbstractFileByPath(value) !== null;
+		// Show/hide legacy settings based on mode
+		if (this.plugin.settings.publishingMode !== "frontmatter") {
+			new Setting(containerEl)
+				.setName("Confluence Parent Page ID")
+				.setDesc("Page ID under which your content will be published")
+				.addText((text) =>
+					text
+						.setPlaceholder("23232345645")
+						.setValue(this.plugin.settings.confluenceParentId)
+						.onChange(async (value) => {
+							this.plugin.settings.confluenceParentId = value;
+							await this.plugin.saveSettings();
+						}),
+				);
 
-						// Update UI based on validation
-						if (value && !folderExists) {
-							textComponent.inputEl.addClass("is-invalid");
-							folderValidationEl.setText("⚠️ This folder doesn't exist in your vault");
-							folderValidationEl.show();
-						} else {
-							textComponent.inputEl.removeClass("is-invalid");
-							folderValidationEl.hide();
-						}
+			const folderSetting = new Setting(containerEl)
+				.setName("Folder to publish")
+				.setDesc(
+					"Specify the folder containing files to publish. Files can be excluded using YAML frontmatter."
+				)
+				.addText((text) => {
+					const textComponent = text
+						.setPlaceholder("my-confluence-content")
+						.setValue(this.plugin.settings.folderToPublish)
+						.onChange(async (value) => {
+							// Check if folder exists
+							const folderExists = this.app.vault.getAbstractFileByPath(value) !== null;
 
-						// Still save the value (user might create the folder later)
-						this.plugin.settings.folderToPublish = value;
-						await this.plugin.saveSettings();
-					});
+							// Update UI based on validation
+							if (value && !folderExists) {
+								textComponent.inputEl.addClass("is-invalid");
+								folderValidationEl.setText("⚠️ This folder doesn't exist in your vault");
+								folderValidationEl.show();
+							} else {
+								textComponent.inputEl.removeClass("is-invalid");
+								folderValidationEl.hide();
+							}
 
-				return textComponent;
-			});
+							// Still save the value (user might create the folder later)
+							this.plugin.settings.folderToPublish = value;
+							await this.plugin.saveSettings();
+						});
 
-		// Add validation message element
-		const folderValidationEl = folderSetting.descEl.createDiv("validation-error");
-		folderValidationEl.addClass("setting-item-description");
-		folderValidationEl.addClass("text-error");
-		folderValidationEl.style.marginTop = "8px";
-		folderValidationEl.hide();
+					return textComponent;
+				});
 
-		// Validate on initial load
-		if (this.plugin.settings.folderToPublish) {
-			const folderExists = this.app.vault.getAbstractFileByPath(this.plugin.settings.folderToPublish) !== null;
-			if (!folderExists) {
-				const textComponent = folderSetting.components[0] as TextComponent;
-				if (textComponent?.inputEl) {
-					textComponent.inputEl.addClass("is-invalid");
-					folderValidationEl.setText("⚠️ This folder doesn't exist in your vault");
-					folderValidationEl.show();
+			// Add validation message element
+			const folderValidationEl = folderSetting.descEl.createDiv("validation-error");
+			folderValidationEl.addClass("setting-item-description");
+			folderValidationEl.addClass("text-error");
+			folderValidationEl.style.marginTop = "8px";
+			folderValidationEl.hide();
+
+			// Validate on initial load
+			if (this.plugin.settings.folderToPublish) {
+				const folderExists = this.app.vault.getAbstractFileByPath(this.plugin.settings.folderToPublish) !== null;
+				if (!folderExists) {
+					const textComponent = folderSetting.components[0] as TextComponent;
+					if (textComponent?.inputEl) {
+						textComponent.inputEl.addClass("is-invalid");
+						folderValidationEl.setText("⚠️ This folder doesn't exist in your vault");
+						folderValidationEl.show();
+					}
 				}
 			}
+		} else {
+			// Show simple frontmatter mode message
+			containerEl.createEl("div", {
+				text: "Frontmatter Mode is enabled. Create folder notes with connie-parent-page-id in their frontmatter to define PSFs.",
+				cls: "setting-item-description"
+			});
 		}
 
 		// containerEl.createEl("hr");

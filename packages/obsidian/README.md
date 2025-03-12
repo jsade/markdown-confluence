@@ -24,10 +24,59 @@ Please log issues to https://github.com/markdown-confluence/markdown-confluence/
 2. Open the plugin settings and configure the following fields:
 
 - `Confluence Base URL`: The base URL of your Atlassian Confluence instance (e.g., `https://your-domain.atlassian.net`)
-- `Confluence Parent Id`: The Confluence page ID where your notes will be published as child pages
 - `Atlassian User Name`: Your Atlassian account's email address
 - `Atlassian API Token`: Your Atlassian API token. You can generate one from your [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens).
+- `Publishing Mode`: Choose between Legacy Mode and Frontmatter Mode (see below)
+
+### Legacy Mode
+When using Legacy Mode, configure these additional settings:
+- `Confluence Parent Id`: The Confluence page ID where your notes will be published as child pages
 - `Folder To Publish`: The name of the folder in Obsidian containing the notes you want to publish (default: "Confluence Pages")
+
+### Frontmatter Mode
+Frontmatter Mode allows you to map multiple source folders to different parent pages in Confluence. To use this mode:
+
+1. Select "Frontmatter Mode" in the Publishing Mode dropdown
+2. Create "Folder Notes" in each folder you want to publish
+3. Add `connie-parent-page-id` to the frontmatter of each Folder Note
+
+#### Example Structure
+
+```
+Project A/                              # A Publish Source Folder (PSF)
+├── Project A.md                        # Folder Note with connie-parent-page-id: "123456789"
+├── Requirements.md
+├── Design.md
+└── Specifications/
+    ├── API.md
+    └── Database.md
+
+Project B/                              # Another PSF
+├── Project B.md                        # Folder Note with connie-parent-page-id: "987654321"
+├── Notes.md
+└── Team/
+    ├── Members.md
+    └── Project C/                      # A nested PSF
+        ├── Project C.md                # Folder Note with connie-parent-page-id: "456789123"
+        ├── Tasks.md
+        └── Timeline.md
+```
+
+#### Folder Note Example
+
+A Folder Note is a file with the same name as its parent folder. For a folder named "Project A", create a file "Project A.md" inside it with the following frontmatter:
+
+```yaml
+---
+connie-parent-page-id: "123456789"
+---
+
+# Project A
+
+This is the root page for Project A.
+```
+
+Each Folder Note with `connie-parent-page-id` in its frontmatter defines a Publish Source Folder (PSF). The content of each PSF will be published to the specified Confluence Parent Page ID.
 
 ![Settings](./docs/screenshots/settings.png)
 

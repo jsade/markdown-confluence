@@ -16,7 +16,7 @@ export abstract class SettingsLoader {
 			throw new Error("Confluence base URL is required");
 		}
 
-		if (!settings.confluenceParentId) {
+		if (!settings.confluenceParentId && (!('publishingMode' in settings) || settings.publishingMode === 'legacy')) {
 			throw new Error("Confluence parent ID is required");
 		}
 
@@ -28,7 +28,7 @@ export abstract class SettingsLoader {
 			throw new Error("Atlassian API token is required");
 		}
 
-		if (!settings.folderToPublish) {
+		if (!settings.folderToPublish && (!('publishingMode' in settings) || settings.publishingMode === 'legacy')) {
 			throw new Error("Folder to publish is required");
 		}
 

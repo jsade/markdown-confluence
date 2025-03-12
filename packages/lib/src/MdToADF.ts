@@ -2,8 +2,8 @@ import { isSafeUrl } from "@atlaskit/adf-schema";
 import { p } from "@atlaskit/adf-utils/builders";
 import { traverse } from "@atlaskit/adf-utils/traverse";
 import {
-    JSONDocNode,
-    JSONTransformer,
+	JSONDocNode,
+	JSONTransformer,
 } from "@atlaskit/editor-json-transformer";
 import { MarkdownFile } from "./adaptors";
 import { MarkdownToConfluenceCodeBlockLanguageMap } from "./CodeBlockLanguageMap";
@@ -125,9 +125,9 @@ function processADF(adf: JSONDocNode, confluenceBaseUrl: string): JSONDocNode {
 				try {
 					const parsedAdf = JSON.parse(
 						node?.content?.at(0)?.text ??
-							JSON.stringify(
-								p("ADF missing from ADF Code Block."),
-							),
+						JSON.stringify(
+							p("ADF missing from ADF Code Block."),
+						),
 					);
 					node = parsedAdf;
 					return node;
@@ -164,5 +164,6 @@ export function convertMDtoADF(
 		...file,
 		...results,
 		contents: adfContent,
+		parentPageId: file.frontmatter["connie-parent-page-id"] as string | undefined,
 	};
 }
