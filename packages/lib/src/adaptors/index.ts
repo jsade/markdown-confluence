@@ -1,4 +1,3 @@
-import { Api } from "confluence.js";
 import { ConfluencePerPageAllValues } from "../ConniePageConfig";
 export type FilesToUpload = Array<MarkdownFile>;
 
@@ -42,11 +41,29 @@ export interface LoaderAdaptor {
 }
 
 export interface RequiredConfluenceClient {
-	content: Api.Content;
-	space: Api.Space;
-	contentAttachments: Api.ContentAttachments;
-	contentLabels: Api.ContentLabels;
-	users: Api.Users;
+	content: {
+		create: (params: any) => Promise<any>;
+		update: (params: any) => Promise<any>;
+		get: (params: any) => Promise<any>;
+		getChildren: (params: any) => Promise<any>;
+		search: (params: any) => Promise<any>;
+	};
+	space: {
+		get: (params: any) => Promise<any>;
+		getContent: (params: any) => Promise<any>;
+	};
+	contentAttachments: {
+		createOrUpdateAttachment: (params: any) => Promise<any>;
+		getAttachments: (params: any) => Promise<any>;
+	};
+	contentLabels: {
+		addLabels: (params: any) => Promise<any>;
+		getLabels: (params: any) => Promise<any>;
+	};
+	users: {
+		getCurrentUser: (params: any) => Promise<any>;
+		getUser: (params: any) => Promise<any>;
+	};
 	apiVersion?: 'v1' | 'v2';
 	v2?: {
 		folders: {

@@ -3,16 +3,16 @@
 process.setMaxListeners(Infinity);
 
 import {
-	AutoSettingsLoader,
-	ConsoleLogger,
-	FileSystemAdaptor,
-	MermaidRendererPlugin,
-	Publisher
+    AutoSettingsLoader,
+    ConsoleLogger,
+    FileSystemAdaptor,
+    MermaidRendererPlugin,
+    Publisher
 } from "@markdown-confluence/lib";
 import { PuppeteerMermaidRenderer } from "@markdown-confluence/mermaid-puppeteer-renderer";
+import { ObsidianConfluenceClient } from "@markdown-confluence/obsidian/src/clients/obsidian-confluence-client";
 import boxen from "boxen";
 import chalk from "chalk";
-import { ConfluenceClient } from "confluence.js";
 
 // Define the main function
 async function main() {
@@ -23,7 +23,7 @@ async function main() {
 	const logger = new ConsoleLogger();
 
 	const adaptor = new FileSystemAdaptor(settings, logger); // Pass the logger to the adaptor
-	const confluenceClient = new ConfluenceClient({
+	const confluenceClient = new ObsidianConfluenceClient({
 		host: settings.confluenceBaseUrl,
 		authentication: {
 			basic: {
@@ -31,16 +31,7 @@ async function main() {
 				apiToken: settings.atlassianApiToken,
 			},
 		},
-		middlewares: {
-			onError(e) {
-				if ("response" in e && "data" in e.response) {
-					e.message =
-						typeof e.response.data === "string"
-							? e.response.data
-							: JSON.stringify(e.response.data);
-				}
-			},
-		},
+		logger,
 	});
 
 	const publisher = new Publisher(

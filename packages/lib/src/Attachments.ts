@@ -1,6 +1,6 @@
-import SparkMD5 from "spark-md5";
-import { RequiredConfluenceClient, LoaderAdaptor } from "./adaptors";
 import sizeOf from "image-size";
+import SparkMD5 from "spark-md5";
+import { LoaderAdaptor, RequiredConfluenceClient } from "./adaptors";
 
 export type ConfluenceImageStatus = "existing" | "uploaded";
 
@@ -62,7 +62,7 @@ export async function uploadBuffer(
 	};
 
 	const attachmentResponse =
-		await confluenceClient.contentAttachments.createOrUpdateAttachments(
+		await confluenceClient.contentAttachments.createOrUpdateAttachment(
 			attachmentDetails,
 		);
 
@@ -128,7 +128,7 @@ export async function uploadFile(
 		};
 
 		const attachmentResponse =
-			await confluenceClient.contentAttachments.createOrUpdateAttachments(
+			await confluenceClient.contentAttachments.createOrUpdateAttachment(
 				attachmentDetails,
 			);
 

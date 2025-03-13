@@ -1,0 +1,116 @@
+openapi: 3.1.0
+info:
+  title: The Confluence Cloud REST API
+  description: >-
+    This document describes the REST API and resources provided by Confluence.
+    The REST APIs are for developers who want to integrate Confluence into their
+    application and for administrators who want to script interactions with the
+    Confluence server.Confluence's REST APIs provide access to resources (data
+    entities) via URI paths. To use a REST API, your application will make an
+    HTTP request and parse the response. The response format is JSON. Your
+    methods will be the standard HTTP methods like GET, PUT, POST and DELETE.
+    Because the REST API is based on open standards, you can use any web
+    development language to access the API.
+  termsOfService: https://atlassian.com/terms/
+  version: 1.0.0
+externalDocs:
+  description: The online and complete version of the Confluence Cloud REST API docs.
+  url: https://developer.atlassian.com/cloud/confluence/rest/
+servers:
+  - url: //your-domain.atlassian.net
+tags:
+  - name: Audit
+    description: ''
+  - name: Analytics
+    description: ''
+  - name: Content
+    description: ''
+  - name: Content - attachments
+    description: ''
+  - name: Content body
+    description: ''
+  - name: Content - children and descendants
+    description: ''
+  - name: Content - macro body
+    description: ''
+  - name: Content comments
+    description: ''
+  - name: Content labels
+    description: ''
+  - name: Content permissions
+    description: ''
+  - name: Content properties
+    description: ''
+  - name: Content restrictions
+    description: ''
+  - name: Content states
+    description: ''
+  - name: Content versions
+    description: ''
+  - name: Content watches
+    description: ''
+  - name: Dynamic modules
+    description: ''
+  - name: Experimental
+    description: APIs in this section can change without any prior deprecation notice.
+  - name: Group
+    description: >-
+      **[WARNING](https://support.atlassian.com/user-management/docs/create-and-update-groups/)
+      The standard Atlassian group names are default names only and can be
+      edited or deleted.**  For example, an admin or Atlassian support could
+      delete the default group jira-software-users or rename it to jsw-users at
+      any point.
+  - name: Inline tasks
+    description: ''
+  - name: Label info
+    description: ''
+  - name: Long-running task
+    description: ''
+  - name: Relation
+    description: ''
+paths:
+  /wiki/rest/api/audit:
+    get:
+      tags:
+        - Audit
+      summary: Get audit records
+      description: >-
+        Returns all records in the audit log, optionally for a certain date
+        range.
+
+        This contains information about events like space exports, group
+        membership
+
+        changes, app installations, etc. For more information, see
+
+        [Audit
+        log](https://confluence.atlassian.com/confcloud/audit-log-802164269.html)
+
+        in the Confluence administrator's guide.
+components:
+  schemas:
+    # Basic schema placeholders that replace problematic elements
+    AccountId:
+      required:
+        - accountId
+      type: object
+      properties:
+        accountId:
+          type: string
+    AccountIdEmailRecord:
+      required:
+        - accountId
+        - email
+      type: object
+      properties:
+        accountId:
+          type: string
+        email:
+          type: string
+    # Fixed schema for the multipleOf property, ensuring exclusiveMinimum is numeric
+    # In OpenAPI 3.1.0, exclusiveMinimum should be numeric, not a boolean
+    # This is a placeholder as we don't know the exact schema that was problematic
+    NumberSchema:
+      type: number
+      multipleOf: 1.0
+      exclusiveMinimum: 0

@@ -26,3 +26,5 @@ build.log
 openapi*.json
 *.md
 *.markdown
+confluence-v2-ts-client-generated/
+confluence-v1-ts-client-generated/

@@ -1,11 +1,11 @@
 import { RequiredConfluenceClient } from "@markdown-confluence/lib";
 import {
-	Api,
-	AuthenticationService,
-	Callback,
-	Client,
-	Config,
-	RequestConfig,
+    Api,
+    AuthenticationService,
+    Callback,
+    Client,
+    Config,
+    RequestConfig,
 } from "confluence.js";
 import { requestUrl } from "obsidian";
 import { Logger, LogLevel } from "./utils";
@@ -46,6 +46,9 @@ const V2_API_ENDPOINTS = [
 ];
 
 export class MyBaseClient implements Client {
+	// Add the api property required by the Client interface
+	api = {};
+
 	protected logger: Logger;
 
 	// URL prefixes for different API versions
@@ -61,6 +64,16 @@ export class MyBaseClient implements Client {
 			prefix: "ConfluenceClient",
 			minLevel: LogLevel.INFO, // Set to INFO level to see important messages
 		});
+	}
+
+	// Method to access the logger from derived classes
+	getLogger(): Logger {
+		return this.logger;
+	}
+
+	// Method to access the base URL from derived classes
+	getBaseUrl(): string {
+		return this.config.host;
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -480,7 +493,7 @@ export class MyBaseClient implements Client {
 	 * @param contentId The ID of the content to check
 	 * @returns The content type ('page', 'blogpost', 'custom-content') or undefined if not determined
 	 */
-	protected async determineContentTypeForId(contentId: string): Promise<string | undefined> {
+	public async determineContentTypeForId(contentId: string): Promise<string | undefined> {
 		let contentType: string | undefined;
 
 		try {
@@ -612,6 +625,57 @@ export class MyBaseClient implements Client {
 			throw error;
 		}
 	}
+
+	/**
+	 * Find a folder by title in a specific space
+	 * @param title The folder title to search for
+	 * @param spaceKey The space key to search in
+	 * @returns The folder details if found, or null if not found
+	 */
+	async findFolderByTitle(title: string, spaceKey: string): Promise<{
+		id: string;
+		title: string;
+		type: string;
+		[key: string]: unknown;
+	} | null> {
+		this.logger.info(`Searching for folder with title "${title}" in space "${spaceKey}"`);
+
+		try {
+			// Escape quotes in the title for the CQL query
+			const escapedTitle = title.replace(/"/g, '\\"');
+
+			// Build CQL query: space="<spaceKey>" AND title="<title>" AND type="folder"
+			const cql = `space="${spaceKey}" AND title="${escapedTitle}" AND type="folder"`;
+			this.logger.debug(`Using CQL query: ${cql}`);
+
+			// Search for the folder
+			const searchResults = await this.searchContentByCQL(cql, 1);
+
+			if (searchResults.size > 0 && searchResults.results.length > 0) {
+				const folder = searchResults.results[0];
+				// Check for undefined and use safe property access
+				const folderTitle = folder && typeof folder === 'object' ? (folder['title'] as string || 'Unknown') : 'Unknown';
+				const folderId = folder && typeof folder === 'object' ? (folder['id'] as string || 'Unknown') : 'Unknown';
+				this.logger.info(`Found folder: "${folderTitle}" with ID ${folderId}`);
+				return folder as {
+					id: string;
+					title: string;
+					type: string;
+					[key: string]: unknown;
+				};
+			}
+
+			this.logger.info(`No folder found with title "${title}" in space "${spaceKey}"`);
+			return null;
+		} catch (error) {
+			this.logger.error(`Error finding folder by title: ${error instanceof Error ? error.message : String(error)}`);
+			if (error instanceof Error && 'response' in error) {
+				this.logger.error(`API response error details: ${JSON.stringify((error as { response: unknown }).response, null, 2)}`);
+			}
+			// Return null instead of throwing to make it easier to handle folder not found cases
+			return null;
+		}
+	}
 }
 
 export interface ErrorData {
@@ -686,8 +750,42 @@ export class ObsidianConfluenceClient
 				title: string;
 				[key: string]: unknown;
 			}>;
+			updateFolder: (id: string, params: {
+				title?: string;
+				parentId?: string;
+			}) => Promise<{
+				id: string;
+				title: string;
+				[key: string]: unknown;
+			}>;
 		};
 	};
+
+	// Explicitly implement the fetch method as required by the interface
+	override fetch(url: string, options: Record<string, unknown> = {}): Promise<unknown> {
+		return super.fetch(url, options);
+	}
+
+	// Explicitly implement the searchContentByCQL method as required by the interface
+	override searchContentByCQL(cql: string, limit: number = 10): Promise<{
+		results: Array<Record<string, unknown>>;
+		size: number;
+		start: number;
+		limit: number;
+		[key: string]: unknown;
+	}> {
+		return super.searchContentByCQL(cql, limit);
+	}
+
+	// Explicitly implement the findFolderByTitle method as required by the interface
+	override findFolderByTitle(title: string, spaceKey: string): Promise<{
+		id: string;
+		title: string;
+		type: string;
+		[key: string]: unknown;
+	} | null> {
+		return super.findFolderByTitle(title, spaceKey);
+	}
 
 	constructor(config: Config) {
 		super(config);
@@ -1194,70 +1292,24 @@ export class ObsidianConfluenceClient
 		} as unknown as Api.Users;
 
 		// Initialize v2 API
+		const foldersApi = new V2FoldersApi(this);
 		this.v2 = {
-			folders: new V2FoldersApi(this)
+			folders: {
+				getFolderById: (id: string) => foldersApi.getFolderById(id),
+				createFolder: (params) => foldersApi.createFolder(params),
+				updateFolder: (id, params) => foldersApi.updateFolder(id, params)
+			}
 		};
 	}
 
 	// Method to get the logger for use by derived classes
-	getLogger(): Logger {
+	override getLogger(): Logger {
 		return this.logger;
 	}
 
 	// Method to safely access the base URL
-	getBaseUrl(): string {
+	override getBaseUrl(): string {
 		return this.config.host;
-	}
-
-	/**
-	 * Find a folder by title in a specific space
-	 * @param title The folder title to search for
-	 * @param spaceKey The space key to search in
-	 * @returns The folder details if found, or null if not found
-	 */
-	async findFolderByTitle(title: string, spaceKey: string): Promise<{
-		id: string;
-		title: string;
-		type: string;
-		[key: string]: unknown;
-	} | null> {
-		this.logger.info(`Searching for folder with title "${title}" in space "${spaceKey}"`);
-
-		try {
-			// Escape quotes in the title for the CQL query
-			const escapedTitle = title.replace(/"/g, '\\"');
-
-			// Build CQL query: space="<spaceKey>" AND title="<title>" AND type="folder"
-			const cql = `space="${spaceKey}" AND title="${escapedTitle}" AND type="folder"`;
-			this.logger.debug(`Using CQL query: ${cql}`);
-
-			// Search for the folder
-			const searchResults = await this.searchContentByCQL(cql, 1);
-
-			if (searchResults.size > 0 && searchResults.results.length > 0) {
-				const folder = searchResults.results[0];
-				// Check for undefined and use safe property access
-				const folderTitle = folder && typeof folder === 'object' ? (folder['title'] as string || 'Unknown') : 'Unknown';
-				const folderId = folder && typeof folder === 'object' ? (folder['id'] as string || 'Unknown') : 'Unknown';
-				this.logger.info(`Found folder: "${folderTitle}" with ID ${folderId}`);
-				return folder as {
-					id: string;
-					title: string;
-					type: string;
-					[key: string]: unknown;
-				};
-			}
-
-			this.logger.info(`No folder found with title "${title}" in space "${spaceKey}"`);
-			return null;
-		} catch (error) {
-			this.logger.error(`Error finding folder by title: ${error instanceof Error ? error.message : String(error)}`);
-			if (error instanceof Error && 'response' in error) {
-				this.logger.error(`API response error details: ${JSON.stringify((error as { response: unknown }).response, null, 2)}`);
-			}
-			// Return null instead of throwing to make it easier to handle folder not found cases
-			return null;
-		}
 	}
 }
 
@@ -1471,21 +1523,21 @@ class V2FoldersApi {
 	 * @param params The properties to update
 	 * @returns The updated folder response
 	 */
-	async updateFolder(folderId: string, params: {
+	async updateFolder(id: string, params: {
 		title?: string;
 		parentId?: string;
 	}): Promise<V2FolderResponse> {
 		const logger = this.client.getLogger();
-		logger.info(`Updating folder ID: ${folderId} with params: ${JSON.stringify(params)}`);
+		logger.info(`Updating folder ID: ${id} with params: ${JSON.stringify(params)}`);
 
 		try {
 			// First, get the current folder
-			const existingFolder = await this.getFolderById(folderId);
+			const existingFolder = await this.getFolderById(id);
 			logger.info(`Found existing folder: ${existingFolder.title} (${existingFolder.id})`);
 
 			// Prepare the request body
 			const requestBody: Record<string, unknown> = {
-				id: folderId,
+				id: id,
 				status: 'current',
 				version: {
 					number: (existingFolder.version && typeof existingFolder.version === 'object'
@@ -1509,7 +1561,7 @@ class V2FoldersApi {
 			}
 
 			// Make the API request
-			const endpoint = `api/v2/folders/${folderId}`;
+			const endpoint = `api/v2/folders/${id}`;
 			logger.info(`Calling endpoint: ${endpoint} with method: PUT`);
 			logger.info(`Request body: ${JSON.stringify(requestBody)}`);
 
@@ -1541,9 +1593,9 @@ class V2FoldersApi {
 					};
 
 					if (folderError.status === 403) {
-						throw new Error(`Permission denied when updating folder ${folderId}. Check user permissions.`);
+						throw new Error(`Permission denied when updating folder ${id}. Check user permissions.`);
 					} else if (folderError.status === 404) {
-						throw new Error(`Folder with ID ${folderId} or parent with ID ${params.parentId} not found.`);
+						throw new Error(`Folder with ID ${id} or parent with ID ${params.parentId} not found.`);
 					} else if (folderError.status === 400 && folderError.detail) {
 						throw new Error(`Invalid request when updating folder: ${folderError.detail}`);
 					}
@@ -1559,6 +1611,7 @@ class V2FoldersApi {
 		includeCollaborators?: boolean;
 		includeOperations?: boolean;
 		includeProperties?: boolean;
+
 	}): Promise<V2FolderResponse> {
 		const queryParams = new URLSearchParams();
 		if (params) {
@@ -1632,3 +1685,5 @@ class V2FoldersApi {
 		}
 	}
 }
+
+

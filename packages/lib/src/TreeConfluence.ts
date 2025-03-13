@@ -5,11 +5,11 @@ import { prepareAdfToUpload } from "./AdfProcessing";
 import { PageContentType } from "./ConniePageConfig";
 import { ConsoleLogger } from './ILogger';
 import {
-	ConfluenceAdfFile,
-	ConfluenceNode,
-	ConfluenceTreeNode,
-	LocalAdfFile,
-	LocalAdfFileTreeNode,
+    ConfluenceAdfFile,
+    ConfluenceNode,
+    ConfluenceTreeNode,
+    LocalAdfFile,
+    LocalAdfFileTreeNode,
 } from "./Publisher";
 import { ConfluenceSettings } from "./Settings";
 
@@ -253,7 +253,7 @@ export async function createFileStructureInConfluence(
 							// If spaceKey is alphanumeric, we need to look up the corresponding space ID
 							try {
 								logger.info(`Looking up space ID for key: ${spaceKey}`);
-								const spaceResponse = await confluenceClient.space.getSpace({
+								const spaceResponse = await confluenceClient.space.get({
 									spaceKey: spaceKey,
 									expand: ['id']
 								});
@@ -463,7 +463,7 @@ async function createNewFolderV2(
 		// Need to look up the space ID from the alphanumeric space key
 		try {
 			logger.info(`Looking up space ID for key: ${spaceKey}`);
-			const spaceResponse = await confluenceClient.space.getSpace({
+			const spaceResponse = await confluenceClient.space.get({
 				spaceKey: spaceKey,
 				expand: ['id']
 			});
@@ -582,7 +582,7 @@ async function ensurePageExists(
 				// Need to look up the space ID from the alphanumeric space key
 				try {
 					logger.info(`Looking up space ID for key: ${spaceKey}`);
-					const spaceResponse = await confluenceClient.space.getSpace({
+					const spaceResponse = await confluenceClient.space.get({
 						spaceKey: spaceKey,
 						expand: ['id']
 					});
@@ -674,7 +674,7 @@ async function ensurePageExists(
 	if (file.pageId) {
 		try {
 			logger.debug(`Page has ID ${file.pageId}, fetching page details from Confluence`);
-			const contentById = await confluenceClient.content.getContentById({
+			const contentById = await confluenceClient.content.get({
 				id: file.pageId,
 				expand: [
 					"version",
@@ -696,7 +696,6 @@ async function ensurePageExists(
 				publish: true,
 				pageId: contentById.id,
 			});
-
 			return {
 				id: contentById.id,
 				title: file.pageTitle,
@@ -707,7 +706,7 @@ async function ensurePageExists(
 				spaceKey: contentById.space.key,
 				pageTitle: contentById.title,
 				ancestors:
-					contentById.ancestors?.map((ancestor) => ({
+					contentById.ancestors?.map((ancestor: { id: string }) => ({
 						id: ancestor.id,
 					})) ?? [],
 				contentType: contentById.type,
@@ -763,7 +762,7 @@ async function ensurePageExists(
 	logger.debug(`Searching for page by title: ${file.pageTitle}, type: ${file.contentType}, space: ${spaceKey}`);
 
 	try {
-		const contentByTitle = await confluenceClient.content.getContent(
+		const contentByTitle = await confluenceClient.content.get(
 			searchParams,
 		);
 
@@ -775,7 +774,7 @@ async function ensurePageExists(
 			if (
 				topPageId &&
 				file.contentType === "page" &&
-				!currentPage.ancestors?.some((ancestor) => ancestor.id == topPageId)
+				!currentPage.ancestors?.some((ancestor: { id: string }) => ancestor.id == topPageId)
 			) {
 				const errorMsg = `${file.pageTitle} is trying to overwrite a page outside the page tree from the selected top page`;
 				logger.error(errorMsg);
@@ -796,7 +795,7 @@ async function ensurePageExists(
 				pageTitle: currentPage.title,
 				spaceKey,
 				ancestors:
-					currentPage.ancestors?.map((ancestor) => ({
+					currentPage.ancestors?.map((ancestor: { id: string }) => ({
 						id: ancestor.id,
 					})) ?? [],
 				contentType: currentPage.type,
@@ -841,7 +840,7 @@ async function ensurePageExists(
 
 					// Verify parent page exists
 					try {
-						const parentPage = await confluenceClient.content.getContentById({
+						const parentPage = await confluenceClient.content.get({
 							id: parentPageId,
 							expand: ["title"]
 						});
@@ -860,7 +859,7 @@ async function ensurePageExists(
 			}
 
 			try {
-				const pageDetails = await confluenceClient.content.createContent(
+				const pageDetails = await confluenceClient.content.create(
 					creatingBlankPageRequest,
 				);
 
@@ -879,7 +878,7 @@ async function ensurePageExists(
 					existingAdf: pageDetails['body']?.['atlas_doc_format']?.['value'],
 					pageTitle: pageDetails.title,
 					ancestors:
-						pageDetails.ancestors?.map((ancestor) => ({
+						pageDetails.ancestors?.map((ancestor: { id: string }) => ({
 							id: ancestor.id,
 						})) ?? [],
 					spaceKey,

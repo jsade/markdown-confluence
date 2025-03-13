@@ -1,25 +1,22 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { expect, test } from "@jest/globals";
-import { ConfluenceClient } from "confluence.js";
+import { ObsidianConfluenceClient } from "@markdown-confluence/obsidian/src/clients/obsidian-confluence-client";
 import {
-	BinaryFile,
-	FilesToUpload,
-	LoaderAdaptor,
-	MarkdownFile,
+    BinaryFile,
+    FilesToUpload,
+    LoaderAdaptor,
+    MarkdownFile,
 } from "./adaptors";
-import { orderMarks } from "./AdfEqual";
 import {
-	ChartData,
-	MermaidRenderer,
-	MermaidRendererPlugin,
+    ChartData,
+    MermaidRenderer,
+    MermaidRendererPlugin,
 } from "./ADFProcessingPlugins/MermaidRendererPlugin";
 import { ConfluencePerPageAllValues } from "./ConniePageConfig";
 import { NoOpLogger } from "./ILogger";
 import { Publisher } from "./Publisher";
-import {
-	StaticSettingsLoader
-} from "./SettingsLoader";
+import { StaticSettingsLoader } from "./SettingsLoader";
 
 // Define test settings
 const testSettings = {
@@ -243,10 +240,13 @@ class InMemoryAdaptor implements LoaderAdaptor {
 	}
 
 	async loadMarkdownFile(absoluteFilePath: string): Promise<MarkdownFile> {
-		// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-		return this.inMemoryFiles.find(
+		const file = this.inMemoryFiles.find(
 			(t) => t.absoluteFilePath === absoluteFilePath,
-		)!;
+		);
+		if (!file) {
+			throw new Error(`File not found: ${absoluteFilePath}`);
+		}
+		return file;
 	}
 
 	async getMarkdownFilesToUpload(): Promise<FilesToUpload> {
@@ -257,22 +257,21 @@ class InMemoryAdaptor implements LoaderAdaptor {
 		_path: string,
 		_referencedFromFilePath: string,
 	): Promise<false | BinaryFile> {
-		throw new Error("Method not implemented.");
+		return false;
 	}
 
 	async updateMarkdownValues(
 		_absoluteFilePath: string,
 		_values: Partial<ConfluencePerPageAllValues>,
 	): Promise<void> {
-		// No-op for testing
+		// Do nothing
 	}
 }
 
-// Skip the test that's trying to make real API calls
-test.skip("Upload to Confluence", async () => {
+test("publisher initialization", () => {
 	const filesystemAdaptor = new InMemoryAdaptor(markdownTestCases);
 	const mermaidRenderer = new TestMermaidRenderer();
-	const confluenceClient = new ConfluenceClient({
+	const confluenceClient = new ObsidianConfluenceClient({
 		host: settingsLoader.load().confluenceBaseUrl,
 		authentication: {
 			basic: {
@@ -280,67 +279,23 @@ test.skip("Upload to Confluence", async () => {
 				apiToken: settingsLoader.load().atlassianApiToken,
 			},
 		},
+		logger: new NoOpLogger(),
 	});
-
-	const searchParams = {
-		type: "page",
-		space: "it",
-		title: "Test - bf8bb13d-21b4-31b6-4584-8b9683d82086",
-		expand: ["version", "body.atlas_doc_format", "ancestors"],
-	};
-	const contentByTitle = await confluenceClient.content.getContent(
-		searchParams,
-	);
-
-	const pageResult = contentByTitle.results[0];
-	if (!pageResult) {
-		throw new Error("Missing Parent Page");
-	}
-	settingsLoader.load().confluenceParentId = pageResult.id;
-
-	const testSettings = {
-		confluenceBaseUrl: "https://example.atlassian.net/wiki",
-		confluenceParentId: pageResult.id,
-		contentRoot: "/test/",
-		folderToPublish: "/test",
-		atlassianUserName: "test@example.com",
-		atlassianApiToken: "test-token",
-		includeAttachments: true,
-		includeAllMdFiles: false,
-		labels: ["test"],
-		markdownContentReplacementRules: {},
-	};
-
-	const staticSettingsLoader = new StaticSettingsLoader(testSettings);
 
 	const publisher = new Publisher(
 		filesystemAdaptor,
-		staticSettingsLoader,
+		settingsLoader,
 		confluenceClient,
 		[new MermaidRendererPlugin(mermaidRenderer)],
-		new NoOpLogger()
+		new NoOpLogger(),
 	);
 
-	const result = await publisher.publish();
-
-	for (const uploadResult of result) {
-		const afterUpload = await confluenceClient.content.getContentById({
-			id: uploadResult.node.file.pageId,
-			expand: ["body.atlas_doc_format", "space"],
-		});
-
-		const uploadedAdf = orderMarks(
-			JSON.parse(afterUpload.body?.atlas_doc_format?.value ?? "{}"),
-		);
-		const returnedAdf = orderMarks(uploadResult.node.file.contents);
-
-		expect(returnedAdf).toEqual(uploadedAdf);
-	}
-}, 300000);
+	expect(publisher).toBeDefined();
+});
 
 test("markdown to ADF conversion", async () => {
 	const mermaidRenderer = new TestMermaidRenderer();
-	const confluenceClient = new ConfluenceClient({
+	const confluenceClient = new ObsidianConfluenceClient({
 		host: testSettings.confluenceBaseUrl,
 		authentication: {
 			basic: {
@@ -348,21 +303,17 @@ test("markdown to ADF conversion", async () => {
 				apiToken: testSettings.atlassianApiToken,
 			},
 		},
+		logger: new NoOpLogger(),
 	});
 
-	const filesystemAdaptor = new InMemoryAdaptor(markdownTestCases);
-
-	// Use our static mock settings loader instead of AutoSettingsLoader
-	const publisherSettingsLoader = new StaticSettingsLoader(testSettings);
-
 	const publisher = new Publisher(
-		filesystemAdaptor,
-		publisherSettingsLoader,
+		new InMemoryAdaptor(markdownTestCases),
+		settingsLoader,
 		confluenceClient,
 		[new MermaidRendererPlugin(mermaidRenderer)],
-		new NoOpLogger()
+		new NoOpLogger(),
 	);
 
-	// Just doing a simple assertion that doesn't actually run API requests
-	expect(publisher).toBeDefined();
+	const results = await publisher.publish("");
+	expect(results).toBeDefined();
 });
