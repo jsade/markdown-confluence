@@ -1300,48 +1300,107 @@ class V2FoldersApi {
 		title: string;
 		parentId?: string;
 	}): Promise<V2FolderResponse> {
-		const requestBody = {
-			spaceId: params.spaceId,
+		const logger = this.client.getLogger();
+		logger.info(`Creating folder "${params.title}" in space ${params.spaceId} with parent ID: ${params.parentId || 'none'}`);
+
+		const requestBody: Record<string, unknown> = {
 			title: params.title,
-			...(params.parentId ? { parentId: params.parentId } : {})
+			spaceId: params.spaceId
 		};
 
-		const logger = this.client.getLogger();
-		logger.info(`Creating folder using V2 API with params: ${JSON.stringify(params)}`);
+		if (params.parentId) {
+			requestBody['parentId'] = params.parentId;
+			logger.info(`Setting parent ID for folder: ${params.parentId}`);
+		}
 
-		// First, check if a folder with this title already exists in the space
+		// Check if the folder already exists (to avoid duplicate folders)
 		try {
-			let spaceKey;
+			// We need to get a space key for CQL search
+			// The params.spaceId can be either a numeric space ID or an alphanumeric space key
+			let spaceKey = '';
+			const isNumericSpaceId = /^\d+$/.test(params.spaceId);
 
-			// Try to get the space details to get the space key using v2 API
 			try {
-				// Get space details using v2 API endpoint
-				logger.info(`Retrieving space key for space ID: ${params.spaceId} using v2 API`);
-				const spaceResponse = await this.client.fetch(`api/v2/spaces/${params.spaceId}`);
+				if (isNumericSpaceId) {
+					// If spaceId is numeric, we need to look up the corresponding space key
+					logger.info(`Numeric space ID detected: ${params.spaceId}, looking up corresponding space key`);
 
-				if (spaceResponse && typeof spaceResponse === 'object' && 'key' in spaceResponse) {
-					spaceKey = (spaceResponse as { key: string }).key;
-					logger.info(`Successfully retrieved space key: "${spaceKey}" for space ID: ${params.spaceId}`);
+					// Use the /rest/api/space/{id} endpoint to get space info by ID
+					const url = `${this.client.getBaseUrl()}/wiki/rest/api/space/${params.spaceId}`;
+					const response = await this.client.fetch(url, {
+						method: 'GET',
+						headers: {
+							'Content-Type': 'application/json'
+						}
+					});
+
+					// Extract space key from response
+					if (response && typeof response === 'object' && 'key' in response) {
+						spaceKey = response.key as string;
+						logger.info(`Found space key: ${spaceKey} for space ID: ${params.spaceId}`);
+					} else {
+						throw new Error(`Could not find space key for ID: ${params.spaceId}`);
+					}
 				} else {
-					// If we couldn't get the space key, we can't proceed with CQL search
-					logger.error(`Space key not found in response for space ID: ${params.spaceId}`);
-					throw new Error(`Could not retrieve space key for space ID: ${params.spaceId}. CQL search requires a valid space key.`);
+					// If spaceId parameter is actually a space key (alphanumeric), use it directly
+					logger.info(`Using provided space key: ${params.spaceId}`);
+					spaceKey = params.spaceId;
+
+					// Verify the space key is valid
+					const spaceResponse = await this.client.space.getSpace({
+						spaceKey: spaceKey
+					});
+
+					if (!spaceResponse || !spaceResponse.key) {
+						throw new Error(`Invalid space key: ${spaceKey}`);
+					}
+
+					logger.info(`Verified space key: ${spaceKey}`);
 				}
 			} catch (error) {
-				// Log the error but don't continue - we can't do CQL search without a valid space key
-				logger.error(`Error retrieving space key for ID ${params.spaceId}: ${error instanceof Error ? error.message : String(error)}`);
-				throw new Error(`Failed to retrieve space key for space ID: ${params.spaceId}. CQL search requires a valid space key.`);
+				logger.error(`Error retrieving space information: ${error instanceof Error ? error.message : String(error)}`);
+				if (error instanceof Error && 'response' in error) {
+					logger.error(`API response error details: ${JSON.stringify((error as { response: unknown }).response, null, 2)}`);
+				}
+				throw new Error(`Failed to resolve space key. CQL search requires a valid space key. Original error: ${error instanceof Error ? error.message : String(error)}`);
 			}
 
-			// Check if folder exists
+			// Check if folder exists using the properly resolved space key
 			logger.info(`Checking if folder "${params.title}" already exists in space ${spaceKey}`);
 			const existingFolder = await this.client.findFolderByTitle(params.title, spaceKey);
 
 			if (existingFolder) {
 				logger.info(`Folder "${params.title}" already exists with ID ${existingFolder['id']}, returning existing folder`);
 
+				// If we have a parent ID and it's different from the existing one, update the folder's parent
+				if (params.parentId && existingFolder['parentId'] !== params.parentId) {
+					logger.info(`Updating parent of existing folder: changing from ${existingFolder['parentId']} to ${params.parentId}`);
+
+					// Update the folder to have the new parent ID
+					return await this.updateFolder(existingFolder['id'] as string, {
+						parentId: params.parentId
+					});
+				}
+
 				// Return the existing folder information instead of updating it
-				return existingFolder as V2FolderResponse;
+				return {
+					id: existingFolder.id,
+					type: existingFolder.type,
+					status: 'current',
+					title: existingFolder.title,
+					parentId: existingFolder['parentId'] as string | undefined,
+					authorId: existingFolder['authorId'] as string || '',
+					ownerId: existingFolder['ownerId'] as string || '',
+					createdAt: existingFolder['createdAt'] as string || new Date().toISOString(),
+					version: {
+						createdAt: (existingFolder['version'] as { createdAt?: string })?.createdAt || new Date().toISOString(),
+						number: (existingFolder['version'] as { number?: number })?.number || 1,
+						minorEdit: false,
+						authorId: (existingFolder['version'] as { authorId?: string })?.authorId || ''
+					},
+					// eslint-disable-next-line @typescript-eslint/naming-convention
+					_links: existingFolder['_links'] as { base: string;[key: string]: string } || { base: '' }
+				} as V2FolderResponse;
 			}
 
 			// If we get here, the folder doesn't exist, so create it
@@ -1370,96 +1429,38 @@ class V2FoldersApi {
 				body: JSON.stringify(requestBody)
 			});
 
-			logger.info(`Folder creation successful. Response object: ${response ? 'present' : 'missing'}`);
-			logger.info(`Response data: ${JSON.stringify(response, null, 2)}`);
-
+			logger.info(`Folder created successfully: ${JSON.stringify(response)}`);
 			return response as V2FolderResponse;
 		} catch (error) {
-			logger.error(`Error creating folder using V2 API: ${error instanceof Error ? error.message : String(error)}`);
+			logger.error(`Error creating folder: ${error instanceof Error ? error.message : String(error)}`);
 
-			// Check for the specific 400 error about folder already existing
+			// Check for specific API error responses
 			if (error instanceof Error && 'response' in error) {
-				const errorResponse = (error as { response: unknown }).response;
+				const errorResponse = (error as unknown as { response: unknown }).response;
 				logger.error(`API error response: ${JSON.stringify(errorResponse, null, 2)}`);
 
-				// Check if this is the "folder exists with the same title" error
-				if (typeof errorResponse === 'object' && errorResponse &&
-					'errors' in errorResponse && Array.isArray((errorResponse as Record<string, unknown>)['errors'])) {
+				// Try to extract more specific error information
+				interface FolderError {
+					status: number;
+					title?: string;
+					code?: string;
+					detail?: string | null;
+				}
 
-					// Define a type for the error objects in the array
-					interface FolderError {
-						status: number;
-						title?: string;
-						code?: string;
-						detail?: string | null;
-					}
-
-					const errors = (errorResponse as Record<string, unknown>)['errors'] as FolderError[];
-					const folderExistsError = errors.find(e =>
-						e.status === 400 &&
-						e.title &&
-						typeof e.title === 'string' &&
-						e.title.includes('folder exists with the same title')
-					);
-
-					if (folderExistsError) {
-						logger.info(`Folder already exists error detected: "${folderExistsError.title}"`);
-						logger.info(`Attempting to find and update the existing folder instead`);
-
-						// Try to find the existing folder
-						try {
-							// We need to get the space key from the space ID
-							const spaceKey = params.spaceId;
-
-							// Get the existing folder by title
-							const existingFolder = await this.client.findFolderByTitle(params.title, spaceKey);
-
-							if (existingFolder) {
-								logger.info(`Found existing folder: ${existingFolder['id']}`);
-
-								// Update the existing folder
-								return await this.updateFolder(existingFolder['id'], {
-									title: params.title,
-									...(params.parentId ? { parentId: params.parentId } : {})
-								});
-							} else {
-								logger.error(`Could not find existing folder with title "${params.title}" in space ${spaceKey}`);
-								// Re-throw the original error since we couldn't find the folder
-								throw error;
-							}
-						} catch (findError) {
-							logger.error(`Error finding existing folder: ${findError instanceof Error ? findError.message : String(findError)}`);
-							// Re-throw the original error
-							throw error;
-						}
+				// Try to extract detailed error messages for better troubleshooting
+				if (typeof errorResponse === 'object' && errorResponse !== null) {
+					const folderError = errorResponse as FolderError;
+					if (folderError.status === 403) {
+						throw new Error(`Permission denied when creating folder "${params.title}". Check user permissions.`);
+					} else if (folderError.status === 404) {
+						throw new Error(`Space with ID ${params.spaceId} or parent with ID ${params.parentId} not found.`);
+					} else if (folderError.status === 400 && folderError.detail) {
+						throw new Error(`Invalid request when creating folder: ${folderError.detail}`);
 					}
 				}
 			}
 
-			// Log additional details about the client configuration
-			if (error instanceof Error && 'response' in error) {
-				const errorResponse = (error as { response: unknown }).response;
-
-				// Check if this is a specific error about folder content type
-				if (typeof errorResponse === 'object' && errorResponse &&
-					'message' in errorResponse && typeof errorResponse.message === 'string' &&
-					errorResponse.message.includes('Type is not a custom content type : folder')) {
-					logger.error('CRITICAL: Detected "Type is not a custom content type : folder" error.');
-					logger.error('This suggests the API is still treating the folder as a custom content type.');
-					logger.error('Check how the request is being constructed and ensure it is using the dedicated folder endpoints.');
-
-					// Log more details about the client configuration
-					logger.error(`Client API version: ${this.client.apiVersion}`);
-					logger.error(`Is v2 API available: ${'v2' in this.client}`);
-					logger.error(`Request body used: ${JSON.stringify(requestBody)}`);
-
-					// Check request URL construction
-					const apiBase = this.getBaseUrl() || '';
-					const expectedUrl = `${apiBase}/wiki/api/v2/folders`;
-					logger.error(`Expected request URL: ${expectedUrl}`);
-				}
-			}
-
+			// Re-throw original error if we couldn't extract more specific information
 			throw error;
 		}
 	}
@@ -1475,46 +1476,42 @@ class V2FoldersApi {
 		parentId?: string;
 	}): Promise<V2FolderResponse> {
 		const logger = this.client.getLogger();
-		logger.info(`Updating folder with ID ${folderId}`);
+		logger.info(`Updating folder ID: ${folderId} with params: ${JSON.stringify(params)}`);
 
 		try {
-			// First, get the current folder to determine the current version
-			const currentFolder = await this.getFolderById(folderId);
+			// First, get the current folder
+			const existingFolder = await this.getFolderById(folderId);
+			logger.info(`Found existing folder: ${existingFolder.title} (${existingFolder.id})`);
 
-			if (!currentFolder) {
-				throw new Error(`Folder with ID ${folderId} not found`);
-			}
-
-			logger.info(`Current folder: ${JSON.stringify(currentFolder)}`);
-
-			// Create an update request with the current version number incremented
-			const currentVersion = currentFolder.version && typeof currentFolder.version === 'object'
-				? (currentFolder.version as { number?: number }).number || 1
-				: 1;
-
-			// Build the request body with what needs to be updated
+			// Prepare the request body
 			const requestBody: Record<string, unknown> = {
 				id: folderId,
+				status: 'current',
 				version: {
-					number: currentVersion + 1
+					number: (existingFolder.version && typeof existingFolder.version === 'object'
+						? (existingFolder.version as { number?: number }).number || 1
+						: 1) + 1
 				}
 			};
 
-			// Add title if provided
+			// Add the fields to update
 			if (params.title) {
 				requestBody['title'] = params.title;
+				logger.info(`Updating folder title to: ${params.title}`);
+			} else {
+				requestBody['title'] = existingFolder.title;
 			}
 
-			// Add parentId if provided
+			// Update parent if specified
 			if (params.parentId) {
 				requestBody['parentId'] = params.parentId;
+				logger.info(`Updating folder parent ID to: ${params.parentId}`);
 			}
-
-			logger.info(`Updating folder with body: ${JSON.stringify(requestBody)}`);
 
 			// Make the API request
 			const endpoint = `api/v2/folders/${folderId}`;
 			logger.info(`Calling endpoint: ${endpoint} with method: PUT`);
+			logger.info(`Request body: ${JSON.stringify(requestBody)}`);
 
 			const response = await this.client.fetch(endpoint, {
 				method: 'PUT',
@@ -1525,33 +1522,35 @@ class V2FoldersApi {
 				body: JSON.stringify(requestBody)
 			});
 
-			logger.info(`Folder update successful. Response: ${JSON.stringify(response, null, 2)}`);
+			logger.info(`Folder updated successfully: ${JSON.stringify(response)}`);
 			return response as V2FolderResponse;
-		} catch (error: unknown) {
+		} catch (error) {
 			logger.error(`Error updating folder: ${error instanceof Error ? error.message : String(error)}`);
+
+			// Check for specific API error responses
 			if (error instanceof Error && 'response' in error) {
-				logger.error(`API error response: ${JSON.stringify((error as { response: unknown }).response, null, 2)}`);
+				const errorResponse = (error as unknown as { response: unknown }).response;
+				logger.error(`API error response: ${JSON.stringify(errorResponse, null, 2)}`);
+
+				// Try to extract more specific error information
+				if (typeof errorResponse === 'object' && errorResponse !== null) {
+					const folderError = errorResponse as {
+						status?: number;
+						title?: string;
+						detail?: string | null;
+					};
+
+					if (folderError.status === 403) {
+						throw new Error(`Permission denied when updating folder ${folderId}. Check user permissions.`);
+					} else if (folderError.status === 404) {
+						throw new Error(`Folder with ID ${folderId} or parent with ID ${params.parentId} not found.`);
+					} else if (folderError.status === 400 && folderError.detail) {
+						throw new Error(`Invalid request when updating folder: ${folderError.detail}`);
+					}
+				}
 			}
 
-			// Return a minimal V2FolderResponse with the ID to allow the process to continue
-			return {
-				id: folderId,
-				title: params.title || "Unknown folder",
-				type: "folder",
-				status: "current",
-				authorId: "unknown",
-				ownerId: "unknown",
-				createdAt: new Date().toISOString(),
-				version: {
-					createdAt: new Date().toISOString(),
-					number: 1,
-					minorEdit: false,
-					authorId: "unknown"
-				},
-				["_links"]: {
-					base: this.client.getBaseUrl()
-				}
-			};
+			throw error;
 		}
 	}
 

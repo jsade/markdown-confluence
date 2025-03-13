@@ -1,21 +1,27 @@
-import { ConfluenceSettings } from "../Settings";
-import { BinaryFile, FilesToUpload, LoaderAdaptor, MarkdownFile } from ".";
-import { lookup } from "mime-types";
 import { existsSync, lstatSync } from "fs";
 import * as fs from "fs/promises";
+import { stringify } from "gray-matter";
+import { lookup } from "mime-types";
 import * as path from "path";
-import matter, { stringify } from "gray-matter";
+import { BinaryFile, FilesToUpload, LoaderAdaptor, MarkdownFile } from ".";
 import {
 	ConfluencePerPageAllValues,
 	ConfluencePerPageConfig,
 	conniePerPageConfig,
 } from "../ConniePageConfig";
+import { ConsoleLogger, ILogger } from "../ILogger";
+import { MarkdownParser } from "../MarkdownParser";
+import { ConfluenceSettings } from "../Settings";
 
 export class FileSystemAdaptor implements LoaderAdaptor {
 	settings: ConfluenceSettings;
+	private mdParser: MarkdownParser;
+	private logger: ILogger;
 
-	constructor(settings: ConfluenceSettings) {
+	constructor(settings: ConfluenceSettings, logger: ILogger = new ConsoleLogger()) {
 		this.settings = settings;
+		this.logger = logger;
+		this.mdParser = new MarkdownParser(logger);
 
 		if (!existsSync(settings.contentRoot)) {
 			throw new Error(`'${settings.contentRoot}' doesn't exist.`);
@@ -27,8 +33,12 @@ export class FileSystemAdaptor implements LoaderAdaptor {
 
 	async getFileContent(absoluteFilePath: string) {
 		const fileContent = await fs.readFile(absoluteFilePath, "utf-8");
-		const { data, content } = matter(fileContent);
-		return { data, content };
+		const frontmatter = this.mdParser.getFrontmatterFromMd(fileContent);
+		const content = this.mdParser.getContentWithoutFrontmatter(fileContent);
+
+		this.logger.debug(`Reading file content from: ${absoluteFilePath}`);
+
+		return { data: frontmatter, content };
 	}
 
 	async updateMarkdownValues(

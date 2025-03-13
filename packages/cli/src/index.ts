@@ -3,11 +3,11 @@
 process.setMaxListeners(Infinity);
 
 import {
-    AutoSettingsLoader,
-    ConsoleLogger,
-    FileSystemAdaptor,
-    MermaidRendererPlugin,
-    Publisher
+	AutoSettingsLoader,
+	ConsoleLogger,
+	FileSystemAdaptor,
+	MermaidRendererPlugin,
+	Publisher
 } from "@markdown-confluence/lib";
 import { PuppeteerMermaidRenderer } from "@markdown-confluence/mermaid-puppeteer-renderer";
 import boxen from "boxen";
@@ -19,7 +19,10 @@ async function main() {
 	const settingLoader = new AutoSettingsLoader();
 	const settings = settingLoader.load();
 
-	const adaptor = new FileSystemAdaptor(settings); // Make sure this is identical as possible between Obsidian and CLI
+	// Create a console logger with appropriate configuration
+	const logger = new ConsoleLogger();
+
+	const adaptor = new FileSystemAdaptor(settings, logger); // Pass the logger to the adaptor
 	const confluenceClient = new ConfluenceClient({
 		host: settings.confluenceBaseUrl,
 		authentication: {
@@ -40,13 +43,10 @@ async function main() {
 		},
 	});
 
-	// Create a console logger with appropriate configuration
-	const logger = new ConsoleLogger();
-
 	const publisher = new Publisher(
-		adaptor, 
-		settingLoader, 
-		confluenceClient, 
+		adaptor,
+		settingLoader,
+		confluenceClient,
 		[new MermaidRendererPlugin(new PuppeteerMermaidRenderer())],
 		logger
 	);

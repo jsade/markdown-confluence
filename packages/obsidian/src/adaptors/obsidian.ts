@@ -3,12 +3,15 @@ import {
 	ConfluencePageConfig,
 	ConfluenceUploadSettings,
 	FilesToUpload,
+	ILogger,
 	LoaderAdaptor,
 	MarkdownFile,
+	MarkdownParser,
 } from "@markdown-confluence/lib";
 import { lookup } from "mime-types";
 import { App, MetadataCache, TFile, TFolder, Vault } from "obsidian";
 import { Logger, LogLevel } from "../utils";
+import { ObsidianLoggerAdapter } from "../utils/LoggerAdapter";
 
 // Define a FolderInfo interface for tracking folder metadata
 interface FolderInfo {
@@ -18,6 +21,7 @@ interface FolderInfo {
 	parentPageId: string | null;
 	// eslint-disable-next-line @typescript-eslint/naming-convention
 	isParentPSF: boolean;
+	parentFolderId?: string;
 }
 
 export default class ObsidianAdaptor implements LoaderAdaptor {
@@ -26,6 +30,8 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 	settings: ConfluenceUploadSettings.ConfluenceSettings;
 	app: App;
 	private logger: Logger;
+	private libLogger: ILogger;
+	private mdParser: MarkdownParser;
 
 	constructor(
 		vault: Vault,
@@ -42,6 +48,10 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 			prefix: "ObsidianAdaptor",
 			minLevel: ('logLevel' in this.settings ? this.settings.logLevel as unknown as LogLevel : LogLevel.SILENT),
 		});
+
+		// Create a library compatible logger
+		this.libLogger = new ObsidianLoggerAdapter(this.logger);
+		this.mdParser = new MarkdownParser(this.libLogger);
 	}
 
 	async getMarkdownFilesToUpload(): Promise<FilesToUpload> {
@@ -218,18 +228,24 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 	/**
 	 * Creates a markdown file representation for a folder to be published as a folder in Confluence
 	 */
-	private createFolderFile(folder: FolderInfo, parentPageId: string): MarkdownFile {
+	// @ts-expect-error - Parameter is kept for backward compatibility but not used
+	private createFolderFile(folder: FolderInfo, parentPageId: string = ''): MarkdownFile {
 		this.logger.debug(`Creating folder file for: ${folder.path}`);
 
-		// Create minimal frontmatter with proper content type and parent page ID
+		// Create minimal frontmatter with proper content type and parent ID
 		const frontmatter: Record<string, unknown> = {
 			// We still need to mark this as a folder for internal processing
 			// The API choice (v1 vs v2) will be handled during the actual API calls
 			// eslint-disable-next-line @typescript-eslint/naming-convention
 			'connie-content-type': 'folder',
-			// eslint-disable-next-line @typescript-eslint/naming-convention
-			'connie-parent-page-id': folder.parentPageId || parentPageId
 		};
+
+		// A page/folder can't have both parent types of IDs - this aligns with our requirements
+		// If we have a specific parent folder ID, include that as well
+		if (folder.parentFolderId) {
+			// eslint-disable-next-line @typescript-eslint/naming-convention
+			frontmatter['connie-parent-folder-id'] = folder.parentFolderId;
+		}
 
 		return {
 			pageTitle: folder.name,
@@ -316,22 +332,20 @@ export default class ObsidianAdaptor implements LoaderAdaptor {
 		if (!fileFM) {
 			throw new Error("Missing File in Metadata Cache");
 		}
-		const frontMatter = fileFM.frontmatter;
 
-		const parsedFrontMatter: Record<string, unknown> = {};
-		if (frontMatter) {
-			for (const [key, value] of Object.entries(frontMatter)) {
-				parsedFrontMatter[key] = value;
-			}
-		}
+		// Get the raw file contents
+		const fileContents = await this.vault.cachedRead(file);
+
+		// Use MarkdownParser to validate frontmatter and ensure parent ID rules are followed
+		const frontmatter = this.mdParser.getFrontmatterFromMd(fileContents);
 
 		return {
 			pageTitle: file.basename,
 			folderName: file.parent?.name ?? "",
 			absoluteFilePath: file.path,
 			fileName: file.name,
-			contents: await this.vault.cachedRead(file),
-			frontmatter: parsedFrontMatter,
+			contents: fileContents,
+			frontmatter,
 		};
 	}
 

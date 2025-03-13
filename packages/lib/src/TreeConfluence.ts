@@ -53,7 +53,7 @@ const logger = new ConsoleLogger();
 
 function flattenTree(
 	node: ConfluenceTreeNode,
-	ancestors: string[] = [],
+	ancestors: Array<{ id: string }> = [],
 ): ConfluenceNode[] {
 	const nodes: ConfluenceNode[] = [];
 	const { file, version, lastUpdatedBy, existingPageData, children } = node;
@@ -70,7 +70,7 @@ function flattenTree(
 
 	if (children) {
 		children.forEach((child) => {
-			nodes.push(...flattenTree(child, [...ancestors, file.pageId]));
+			nodes.push(...flattenTree(child, [...ancestors, { id: file.pageId }]));
 		});
 	}
 
@@ -182,15 +182,15 @@ export async function createFileStructureInConfluence(
 
 			// Check if we're using the v2 API
 			const isV2Api = 'apiVersion' in confluenceClient && confluenceClient.apiVersion === 'v2';
-			const apiVersion = 'apiVersion' in confluenceClient ? (confluenceClient as unknown as {apiVersion?: string}).apiVersion || 'undefined' : 'undefined';
+			const apiVersion = 'apiVersion' in confluenceClient ? (confluenceClient as unknown as { apiVersion?: string }).apiVersion || 'undefined' : 'undefined';
 
 			logger.info(`API version detection: isV2Api = ${isV2Api}, apiVersion = ${apiVersion}`);
 			logger.info(`Client properties: ${Object.keys(confluenceClient).join(', ')}`);
 
 			// Handle folders differently for v2 API
-			
 
-			if (node.file.contentType === 'folder') { 
+
+			if (node.file.contentType === 'folder') {
 				logger.info(`Content type is FOLDER: ${node.file.pageTitle}`);
 				logger.info(`Folder details: absoluteFilePath=${node.file.absoluteFilePath}, contentType=${node.file.contentType}`);
 			}
@@ -239,35 +239,40 @@ export async function createFileStructureInConfluence(
 					// If we don't have a folder ID or couldn't find an existing one, create a new folder
 					if (!folderId) {
 						// For API v2, we need to get the space ID from the space key
-						let spaceId = spaceKey;
-						logger.info(`Attempting to resolve space ID from key: ${spaceKey}`);
+						let spaceId: string;
+						logger.info(`Converting space key "${spaceKey}" to a space ID for API v2 folder creation`);
 
-						// Try to get the actual space ID if we need to create a new folder
-						try {
-							// This assumes the space key is equal to the space ID in most cases
-							// If not, we would need to implement a space lookup
-							logger.info(`Calling space.getSpace with key: ${spaceKey}`);
-							const spaceResponse = await confluenceClient.space.getSpace({
-								spaceKey: spaceKey,
-								expand: ['id']
-							});
+						// Determine if we already have a numeric space ID or an alphanumeric space key
+						const isNumericSpaceId = /^\d+$/.test(spaceKey);
 
-							logger.info(`Space response: ${JSON.stringify(spaceResponse, null, 2)}`);
+						if (isNumericSpaceId) {
+							// If spaceKey is already numeric, assume it's already a space ID
+							logger.info(`Space key "${spaceKey}" appears to be numeric, treating as a space ID`);
+							spaceId = spaceKey;
+						} else {
+							// If spaceKey is alphanumeric, we need to look up the corresponding space ID
+							try {
+								logger.info(`Looking up space ID for key: ${spaceKey}`);
+								const spaceResponse = await confluenceClient.space.getSpace({
+									spaceKey: spaceKey,
+									expand: ['id']
+								});
 
-							// Get the actual space ID if available
-							if (spaceResponse && spaceResponse.id) {
-								spaceId = String(spaceResponse.id);
-								logger.info(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
-							} else {
-								// Fallback - use the space key as ID
-								logger.warn(`Could not resolve space ID for key ${spaceKey}, using key as ID`);
+								if (spaceResponse && spaceResponse.id) {
+									// Convert to string as IDs are often numeric but API expects string
+									spaceId = String(spaceResponse.id);
+									logger.info(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
+								} else {
+									// Error - couldn't find space ID
+									throw new Error(`Could not find space ID for key ${spaceKey}`);
+								}
+							} catch (error) {
+								logger.error(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
+								if (error instanceof Error && 'response' in error) {
+									logger.error(`API error response: ${JSON.stringify((error as ErrorWithResponse).response, null, 2)}`);
+								}
+								throw new Error(`Failed to get space ID for key ${spaceKey}. V2 folder API requires a valid space ID.`);
 							}
-						} catch (error) {
-							logger.warn(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
-							if (error instanceof Error && 'response' in error) {
-								logger.warn(`API error response for space lookup: ${JSON.stringify((error as ErrorWithResponse).response, null, 2)}`);
-							}
-							logger.warn(`Trying to use space key as space ID`);
 						}
 
 						interface FolderCreateParams {
@@ -277,7 +282,7 @@ export async function createFileStructureInConfluence(
 						}
 
 						const folderParams: FolderCreateParams = {
-							spaceId,
+							spaceId: spaceId, // Now we're using the properly resolved space ID
 							title: node.file.pageTitle
 						};
 
@@ -439,55 +444,87 @@ async function createNewFolderV2(
 	adaptor: LoaderAdaptor,
 	file: LocalAdfFile,
 	spaceKey: string,
-	parentPageId: string
+	parentId: string
 ) {
 	logger.info(`Creating new folder with V2 API: ${file.pageTitle}`);
-	
+
 	// Type cast the client to access v2 APIs
 	const clientWithV2 = confluenceClient as unknown as ConfluenceClientV2;
-	
-	// Attempt to get the space ID from the space key
-	let spaceId = spaceKey;
 
-	try {
-		const spaceResponse = await confluenceClient.space.getSpace({
-			spaceKey: spaceKey,
-			expand: ['id']
-		});
+	// Convert space key to space ID for V2 API
+	let spaceId: string;
+	const isNumericSpaceId = /^\d+$/.test(spaceKey);
 
-		// Get the actual space ID if available
-		if (spaceResponse && spaceResponse.id) {
-			spaceId = String(spaceResponse.id);
-			logger.debug(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
-		} else {
-			logger.warn(`Could not resolve space ID for key ${spaceKey}, using key as ID`);
+	if (isNumericSpaceId) {
+		// If spaceKey is already numeric, assume it's already a space ID
+		logger.info(`Space key "${spaceKey}" appears to be numeric, treating as a space ID`);
+		spaceId = spaceKey;
+	} else {
+		// Need to look up the space ID from the alphanumeric space key
+		try {
+			logger.info(`Looking up space ID for key: ${spaceKey}`);
+			const spaceResponse = await confluenceClient.space.getSpace({
+				spaceKey: spaceKey,
+				expand: ['id']
+			});
+
+			// Get the actual space ID
+			if (spaceResponse && spaceResponse.id) {
+				spaceId = String(spaceResponse.id);
+				logger.info(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
+			} else {
+				throw new Error(`Could not find space ID for key ${spaceKey}`);
+			}
+		} catch (error) {
+			logger.error(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
+			if (error instanceof Error && 'response' in error) {
+				logger.error(`API error response: ${JSON.stringify((error as ErrorWithResponse).response, null, 2)}`);
+			}
+			throw new Error(`Failed to get space ID for key ${spaceKey}. V2 folder API requires a valid space ID.`);
 		}
-	} catch (error) {
-		logger.warn(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
-		logger.warn(`Using space key as space ID`);
+	}
+
+	// Determine effective parent ID - in V2 API, we can only use one parent ID
+	// Since this is a folder, prefer parentFolderId over parentPageId
+	// But if neither exists in frontmatter, use the provided parentId parameter
+	let effectiveParentId = parentId;
+
+	// If this folder has a specific parent folder ID in frontmatter, use that
+	if (file.parentFolderId) {
+		effectiveParentId = file.parentFolderId;
+		logger.info(`Using parent folder ID from frontmatter: ${effectiveParentId}`);
+	}
+	// Otherwise, if it has a parent page ID in frontmatter, use that
+	else if (file.parentPageId) {
+		effectiveParentId = file.parentPageId;
+		logger.info(`Using parent page ID from frontmatter: ${effectiveParentId}`);
+	}
+	// If no parent ID in frontmatter, use the provided parameter (comes from tree structure)
+	else {
+		logger.info(`Using effective parent ID from tree structure: ${effectiveParentId}`);
 	}
 
 	const folderParams = {
 		spaceId: spaceId,
 		title: file.pageTitle,
-		parentId: parentPageId
+		parentId: effectiveParentId
 	};
 
 	logger.info(`Creating new folder with params: ${JSON.stringify(folderParams)}`);
-	
+
 	if (!clientWithV2.v2?.folders?.createFolder) {
 		throw new Error("v2.folders.createFolder is not available on this client");
 	}
 
 	const newFolder = await clientWithV2.v2.folders.createFolder(folderParams);
 	logger.info(`Folder created successfully with ID: ${newFolder.id}`);
-	
+
 	// Update the file metadata
 	await adaptor.updateMarkdownValues(file.absoluteFilePath, {
 		publish: true,
 		pageId: newFolder.id,
 	});
-	
+
 	return {
 		id: newFolder.id,
 		title: file.pageTitle,
@@ -517,7 +554,7 @@ async function ensurePageExists(
 	const isV2Api = 'apiVersion' in confluenceClient && confluenceClient.apiVersion === 'v2';
 	logger.info(`Is using API v2 in ensurePageExists: ${isV2Api}, contentType: ${file.contentType}`);
 
-	// If this is a folder and we're using v2 API, skip the regular content checks
+	// If this is a folder and we're using API v2, skip the regular content checks
 	if (file.contentType === 'folder' && isV2Api && 'v2' in confluenceClient) {
 		logger.info(`CRITICAL CHECK: Skipping regular content checks for folder in API v2: ${file.pageTitle}`);
 
@@ -533,32 +570,52 @@ async function ensurePageExists(
 
 		// Create a new folder using v2 API
 		try {
-			// Attempt to get the space ID from the space key
-			let spaceId = spaceKey;
+			// Convert space key to space ID for V2 API
+			let spaceId: string;
+			const isNumericSpaceId = /^\d+$/.test(spaceKey);
 
-			try {
-				const spaceResponse = await confluenceClient.space.getSpace({
-					spaceKey: spaceKey,
-					expand: ['id']
-				});
+			if (isNumericSpaceId) {
+				// If spaceKey is already numeric, assume it's already a space ID
+				logger.info(`Space key "${spaceKey}" appears to be numeric, treating as a space ID`);
+				spaceId = spaceKey;
+			} else {
+				// Need to look up the space ID from the alphanumeric space key
+				try {
+					logger.info(`Looking up space ID for key: ${spaceKey}`);
+					const spaceResponse = await confluenceClient.space.getSpace({
+						spaceKey: spaceKey,
+						expand: ['id']
+					});
 
-				// Get the actual space ID if available
-				if (spaceResponse && spaceResponse.id) {
-					spaceId = String(spaceResponse.id);
-					logger.debug(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
-				} else {
-					// Fallback - use the space key as ID
-					logger.warn(`Could not resolve space ID for key ${spaceKey}, using key as ID`);
+					// Get the actual space ID
+					if (spaceResponse && spaceResponse.id) {
+						spaceId = String(spaceResponse.id);
+						logger.info(`Resolved space ID for key ${spaceKey}: ${spaceId}`);
+					} else {
+						throw new Error(`Could not find space ID for key ${spaceKey}`);
+					}
+				} catch (error) {
+					logger.error(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
+					if (error instanceof Error && 'response' in error) {
+						logger.error(`API error response: ${JSON.stringify((error as ErrorWithResponse).response, null, 2)}`);
+					}
+					throw new Error(`Failed to get space ID for key ${spaceKey}. V2 folder API requires a valid space ID.`);
 				}
-			} catch (error) {
-				logger.warn(`Error getting space ID for key ${spaceKey}: ${error instanceof Error ? error.message : String(error)}`);
-				logger.warn(`Using space key as space ID`);
+			}
+
+			// Determine the appropriate parent ID to use
+			let effectiveParentId = parentPageId;
+
+			// For folders, check if we have a specific parent folder ID
+			if (file.parentFolderId) {
+				effectiveParentId = file.parentFolderId;
+				logger.info(`Using specific parent folder ID from frontmatter: ${effectiveParentId}`);
 			}
 
 			const folderParams = {
-				spaceId: spaceId,
+				spaceId: spaceId,  // Now using the properly resolved numeric space ID
 				title: file.pageTitle,
-				parentId: parentPageId
+				parentId: effectiveParentId
 			};
 
 			logger.info(`FOLDER CREATION CHECK - Creating new folder with API v2: ${JSON.stringify(folderParams)}`);
@@ -680,21 +737,22 @@ async function ensurePageExists(
 
 			throw error;
 		}
-	}	
+	}
 
 	// Try to find page by title
 	// For API v2, we need to handle folders differently
 	const isApiV2 = 'apiVersion' in confluenceClient && confluenceClient.apiVersion === 'v2';
-	
+
 	// Skip content search for folders when using API v2, as folders aren't valid content types in v2
 	if (file.contentType === 'folder' && isApiV2 && 'v2' in confluenceClient) {
 		logger.info(`Skipping content search for folder in API v2: ${file.pageTitle}`);
 		logger.info(`Creating new folder directly using folder endpoints instead`);
-		
+
 		// Proceed directly to folder creation for API v2 (handled below)
-		return await createNewFolderV2(confluenceClient, adaptor, file, spaceKey, parentPageId);
+		return await createNewFolderV2(confluenceClient, adaptor, file, spaceKey,
+			file.parentFolderId || parentPageId); // Use specific parent folder ID if available
 	}
-	
+
 	const searchParams = {
 		type: file.contentType,
 		spaceKey,

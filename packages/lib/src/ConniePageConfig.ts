@@ -12,6 +12,7 @@ export type ConfluencePerPageConfig = {
 	tags: FrontmatterConfig<string[], "array-text">;
 	pageId: FrontmatterConfig<string | undefined, "text">;
 	parentPageId: FrontmatterConfig<string | undefined, "text">;
+	parentFolderId: FrontmatterConfig<string | undefined, "text">;
 	dontChangeParentPageId: FrontmatterConfig<boolean, "boolean">;
 	blogPostDate: FrontmatterConfig<string | undefined, "text">;
 	contentType: FrontmatterConfig<PageContentType, "options">;
@@ -261,6 +262,37 @@ export const conniePerPageConfig: ConfluencePerPageConfig = {
 			return pageId;
 		},
 	},
+	parentFolderId: {
+		key: "connie-parent-folder-id",
+		default: undefined,
+		inputType: "text",
+		inputValidator: (value) => {
+			const digitRegex = /^\d+$/;
+			if (typeof value === "string" && digitRegex.test(value)) {
+				return { valid: true, errors: [] };
+			}
+			return {
+				valid: false,
+				errors: [
+					new Error(
+						"Parent Folder ID needs to be a string and only can contain numbers",
+					),
+				],
+			};
+		},
+		process: (yamlValue) => {
+			let folderId: string | undefined;
+			switch (typeof yamlValue) {
+				case "string":
+				case "number":
+					folderId = yamlValue.toString();
+					break;
+				default:
+					folderId = undefined;
+			}
+			return folderId;
+		},
+	},
 	dontChangeParentPageId: {
 		key: "connie-dont-change-parent-page",
 		default: false,
@@ -399,6 +431,20 @@ export function processConniePerPageConfig(
 		} else {
 			result[propertyKey as keyof ConfluencePerPageValues] =
 				defaultValue as never;
+		}
+	}
+
+	// Validate that a page doesn't have both parent page ID and parent folder ID
+	const hasParentPageId = markdownFile.frontmatter["connie-parent-page-id"] !== undefined;
+	const hasParentFolderId = markdownFile.frontmatter["connie-parent-folder-id"] !== undefined;
+
+	if (hasParentPageId && hasParentFolderId) {
+		// Log a warning and favor parent folder ID by removing parent page ID
+		console.warn(`File ${markdownFile.absoluteFilePath} cannot have both 'connie-parent-page-id' and 'connie-parent-folder-id'. Using parent folder ID.`);
+
+		// Remove parent page ID from the result
+		if ('parentPageId' in result) {
+			delete result.parentPageId;
 		}
 	}
 

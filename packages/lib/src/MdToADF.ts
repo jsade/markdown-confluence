@@ -9,11 +9,10 @@ import { MarkdownFile } from "./adaptors";
 import { MarkdownToConfluenceCodeBlockLanguageMap } from "./CodeBlockLanguageMap";
 import { cleanUpUrlIfConfluence } from "./ConfluenceUrlParser";
 import { processConniePerPageConfig } from "./ConniePageConfig";
+import { MarkdownParser } from "./MarkdownParser";
 import { MarkdownTransformer } from "./MarkdownTransformer";
 import { LocalAdfFile } from "./Publisher";
 import { ConfluenceSettings } from "./Settings";
-
-const frontmatterRegex = /^\s*?---\n([\s\S]*?)\n---\s*/g;
 
 const transformer = new MarkdownTransformer();
 const serializer = new JSONTransformer();
@@ -151,7 +150,11 @@ export function convertMDtoADF(
 	file: MarkdownFile,
 	settings: ConfluenceSettings,
 ): LocalAdfFile {
-	file.contents = file.contents.replace(frontmatterRegex, "");
+	// Create an instance of the MarkdownParser
+	const mdParser = new MarkdownParser();
+
+	// Remove frontmatter from the content
+	file.contents = mdParser.getContentWithoutFrontmatter(file.contents);
 
 	const adfContent = parseMarkdownToADF(
 		file.contents,
@@ -160,10 +163,15 @@ export function convertMDtoADF(
 
 	const results = processConniePerPageConfig(file, settings, adfContent);
 
+	// Extract parent IDs - validation already handled by MarkdownParser
+	const parentPageId = file.frontmatter["connie-parent-page-id"] as string | undefined;
+	const parentFolderId = file.frontmatter["connie-parent-folder-id"] as string | undefined;
+
 	return {
 		...file,
 		...results,
 		contents: adfContent,
-		parentPageId: file.frontmatter["connie-parent-page-id"] as string | undefined,
+		parentPageId,
+		parentFolderId,
 	};
 }

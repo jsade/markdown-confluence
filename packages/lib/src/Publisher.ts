@@ -1,12 +1,6 @@
 import { JSONDocNode } from "@atlaskit/editor-json-transformer";
-import { AlwaysADFProcessingPlugins } from "./ADFProcessingPlugins";
-import {
-	ADFProcessingPlugin,
-	createPublisherFunctions,
-	executeADFProcessingPipeline,
-} from "./ADFProcessingPlugins/types";
+import { ADFProcessingPlugin } from "./ADFProcessingPlugins/types";
 import { adfEqual } from "./AdfEqual";
-import { CurrentAttachments } from "./Attachments";
 import { PageContentType } from "./ConniePageConfig";
 import { ConsoleLogger, ILogger } from './ILogger';
 import { SettingsLoader } from "./SettingsLoader";
@@ -39,6 +33,7 @@ export interface LocalAdfFile {
 	tags: string[];
 	pageId: string | undefined;
 	parentPageId?: string | undefined;
+	parentFolderId?: string | undefined;
 	dontChangeParentPageId: boolean;
 	contentType: PageContentType;
 	blogPostDate: string | undefined;
@@ -60,6 +55,9 @@ export interface ConfluenceAdfFile {
 	spaceKey: string;
 	pageUrl: string;
 
+	parentPageId?: string | undefined;
+	parentFolderId?: string | undefined;
+
 	contentType: PageContentType;
 	blogPostDate: string | undefined;
 }
@@ -67,7 +65,7 @@ export interface ConfluenceAdfFile {
 interface ConfluencePageExistingData {
 	adfContent: JSONDocNode;
 	pageTitle: string;
-	ancestors: { id: string }[];
+	ancestors: Array<{ id: string }>;
 	contentType: string;
 }
 
@@ -76,7 +74,7 @@ export interface ConfluenceNode {
 	version: number;
 	lastUpdatedBy: string;
 	existingPageData: ConfluencePageExistingData;
-	ancestors: string[];
+	ancestors: Array<{ id: string }>;
 }
 
 export interface ConfluenceTreeNode {
@@ -94,27 +92,36 @@ export interface UploadAdfFileResult {
 	labelResult: "same" | "updated" | "error";
 }
 
+interface ConfluenceClientWithApiVersion {
+	apiVersion?: 'v1' | 'v2';
+	v2?: {
+		folders?: {
+			getFolderById: (id: string) => Promise<Record<string, unknown>>;
+			createFolder: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+			updateFolder?: (id: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+		};
+	};
+}
+
 export class Publisher {
 	private confluenceClient: RequiredConfluenceClient;
 	private adaptor: LoaderAdaptor;
 	private myAccountId: string | undefined;
 	private settingsLoader: SettingsLoader;
-	private adfProcessingPlugins: ADFProcessingPlugin<unknown, unknown>[];
 	private logger: ILogger;
 
 	constructor(
 		adaptor: LoaderAdaptor,
 		settingsLoader: SettingsLoader,
 		confluenceClient: RequiredConfluenceClient,
+		// @ts-expect-error - Parameter is required for API compatibility but not used
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		adfProcessingPlugins: ADFProcessingPlugin<unknown, unknown>[],
 		logger: ILogger = new ConsoleLogger(),
 	) {
 		this.adaptor = adaptor;
-		this.settingsLoader = settingsLoader;
 		this.confluenceClient = confluenceClient;
-		this.adfProcessingPlugins = adfProcessingPlugins.concat(
-			AlwaysADFProcessingPlugins,
-		);
+		this.settingsLoader = settingsLoader;
 		this.logger = logger;
 	}
 
@@ -390,7 +397,7 @@ export class Publisher {
 	}
 
 	private async updatePageContent(
-		ancestors: string[],
+		ancestors: Array<{ id: string }>,
 		pageVersionNumber: number,
 		existingPageData: ConfluencePageExistingData,
 		adfFile: ConfluenceAdfFile,
@@ -398,7 +405,7 @@ export class Publisher {
 	): Promise<UploadAdfFileResult> {
 		this.logger.debug(`Updating page content for: ${adfFile.absoluteFilePath}, page ID: ${adfFile.pageId}`);
 		this.logger.info(`Content type: ${adfFile.contentType}, existing content type: ${existingPageData.contentType}`);
-		this.logger.info(`API version check: ${'apiVersion' in this.confluenceClient ? this.confluenceClient.apiVersion : 'not available'}`);
+		this.logger.info(`API version check: ${'apiVersion' in this.confluenceClient ? (this.confluenceClient as unknown as ConfluenceClientWithApiVersion).apiVersion : 'not available'}`);
 
 		if (lastUpdatedBy !== this.myAccountId && lastUpdatedBy !== null && lastUpdatedBy !== '') {
 			const errorMsg = `Page last updated by another user. Won't publish over their changes. MyAccountId: ${this.myAccountId}, Last Updated By: ${lastUpdatedBy}`;
@@ -407,8 +414,9 @@ export class Publisher {
 		}
 
 		// Check if we're using API v2
-		const isV2Api = 'apiVersion' in this.confluenceClient && this.confluenceClient.apiVersion === 'v2';
-		this.logger.info(`Is using API v2: ${isV2Api}, apiVersion: ${(this.confluenceClient as any).apiVersion || 'not set'}`);
+		const confluenceClientWithV2 = this.confluenceClient as unknown as ConfluenceClientWithApiVersion;
+		const isV2Api = 'apiVersion' in this.confluenceClient && confluenceClientWithV2.apiVersion === 'v2';
+		this.logger.info(`Is using API v2: ${isV2Api}, apiVersion: ${confluenceClientWithV2.apiVersion || 'not set'}`);
 
 		// For folders in API v2, we don't validate content type as they use dedicated endpoints
 		if (adfFile.contentType === 'folder' && isV2Api) {
@@ -427,180 +435,159 @@ export class Publisher {
 			labelResult: "same",
 		};
 
-		try {
-			// Skip content updating for folders - they have no content in Confluence
-			if (adfFile.contentType === 'folder') {
-				this.logger.info(`Skipping content update for folder: ${adfFile.pageTitle} (${adfFile.pageId})`);
+		const adfToUpload = adfFile.contents;
 
-				// For API v2, ensure we're using the folder endpoints
-				if (isV2Api && 'v2' in this.confluenceClient) {
-					this.logger.info(`Using API v2 folder endpoints for folder: ${adfFile.pageTitle}`);
-					this.logger.info(`v2 API properties available: ${Object.keys((this.confluenceClient as any).v2).join(', ')}`);
+		// Process PDF files first
+		// ...
 
-					// Check if the 'folders' property exists
-					if ('folders' in (this.confluenceClient as any).v2) {
-						this.logger.info(`v2.folders methods available: ${Object.keys((this.confluenceClient as any).v2.folders).join(', ')}`);
-					} else {
-						this.logger.error(`v2.folders API is not available in the client! This will cause the "Type is not a custom content type : folder" error.`);
+		// Check if this is a folder and we're using API v2 - folders require special handling
+		if (adfFile.contentType === 'folder' && isV2Api) {
+			// Folders don't have content to update in v2, just handle title and parent if needed
+			this.logger.info(`Handling folder update for: ${adfFile.pageTitle} (ID: ${adfFile.pageId})`);
+
+			if (isV2Api && 'v2' in this.confluenceClient) {
+				this.logger.info(`Using API v2 folder endpoints for folder: ${adfFile.pageTitle}`);
+
+				if (confluenceClientWithV2.v2?.folders) {
+					this.logger.info(`v2.folders methods available: ${Object.keys(confluenceClientWithV2.v2.folders).join(', ')}`);
+
+					// Determine if we need to update the folder (title or parent changed)
+					const titleChanged = adfFile.pageTitle !== existingPageData.pageTitle;
+
+					// We only handle parent ID during creation, not updates per requirement
+					// However, check if we have the updateFolder method available for future use
+					if (titleChanged && 'updateFolder' in confluenceClientWithV2.v2.folders) {
+						this.logger.info(`Updating folder title from "${existingPageData.pageTitle}" to "${adfFile.pageTitle}"`);
+
+						try {
+							// Update only the title
+							await confluenceClientWithV2.v2.folders.updateFolder(adfFile.pageId, {
+								title: adfFile.pageTitle
+							});
+
+							result.contentResult = "updated";
+							this.logger.info(`Folder title updated successfully for: ${adfFile.pageId}`);
+						} catch (error) {
+							this.logger.error(`Error updating folder: ${error instanceof Error ? error.message : String(error)}`);
+							if (error instanceof Error && 'response' in error) {
+								this.logger.error(`API error response: ${JSON.stringify((error as { response: unknown }).response, null, 2)}`);
+							}
+							throw error;
+						}
 					}
-					// Folder operations are handled in TreeConfluence.ts so we don't need to do anything here
+
+					// We're done with folder handling in v2
+					return result;
 				} else {
-					this.logger.warn(`Not using API v2 for folder: ${adfFile.pageTitle}. This might cause issues.`);
+					this.logger.error(`v2.folders API is not available in the client! This will cause the "Type is not a custom content type : folder" error.`);
 				}
-
-				// But still process labels
-				await this.updateLabels(adfFile, result);
-
-				return result;
 			}
+		}
 
-			this.logger.debug(`Fetching attachments for page: ${adfFile.pageId}`);
-			const currentUploadedAttachments =
-				await this.confluenceClient.contentAttachments.getAttachments({
-					id: adfFile.pageId,
-				});
+		// Regular page content update logic for pages, blog posts, or folders in v1 API
+		if (!adfEqual(adfToUpload, existingPageData.adfContent)) {
+			this.logger.debug(`Content has changed for: ${adfFile.absoluteFilePath}`);
 
-			this.logger.debug(`Found ${currentUploadedAttachments.results.length} attachments`);
+			// Check if the page title has changed
+			const titleIsDifferent = adfFile.pageTitle !== existingPageData.pageTitle;
 
-			const currentAttachments: CurrentAttachments =
-				currentUploadedAttachments.results.reduce((prev, curr) => {
-					return {
-						...prev,
-						[`${curr.title}`]: {
-							filehash: curr.metadata.comment,
-							attachmentId: curr.extensions.fileId,
-							collectionName: curr.extensions.collectionName,
-						},
+			// We need to pass the ancestors through otherwise Confluence returns a 400 error
+			// If there are no ancestors it means the page is at the root of the space and we don't need to pass them
+			interface ContentUpdateData {
+				id: string;
+				title: string;
+				type: string;
+				space: { key: string };
+				version: { number: number };
+				body: {
+					// eslint-disable-next-line @typescript-eslint/naming-convention
+					atlas_doc_format: {
+						value: string;
+						representation: string;
 					};
-				}, {});
-
-			this.logger.debug(`Processing ADF content with plugins for: ${adfFile.absoluteFilePath}`);
-			const supportFunctions = createPublisherFunctions(
-				this.confluenceClient,
-				this.adaptor,
-				adfFile.pageId,
-				adfFile.absoluteFilePath,
-				currentAttachments,
-			);
-			const adfToUpload = await executeADFProcessingPipeline(
-				this.adfProcessingPlugins,
-				adfFile.contents,
-				supportFunctions,
-			);
-			this.logger.debug(`ADF processing complete for: ${adfFile.absoluteFilePath}`);
-
-			/*
-			const imageResult = Object.keys(imageUploadResult.imageMap).reduce(
-				(prev, curr) => {
-					const value = imageUploadResult.imageMap[curr];
-					if (!value) {
-						return prev;
-					}
-					const status = value.status;
-					return {
-						...prev,
-						[status]: (prev[status] ?? 0) + 1,
-					};
-				},
-				{
-					existing: 0,
-					uploaded: 0,
-				} as Record<string, number>
-			);
-			*/
-
-			/*
-			if (!adfEqual(adfFile.contents, imageUploadResult.adf)) {
-				result.imageResult =
-					(imageResult["uploaded"] ?? 0) > 0 ? "updated" : "same";
-			}
-			*/
-
-			result.imageResult = "updated";
-
-			this.logger.debug(`Checking if content has changed for: ${adfFile.absoluteFilePath}`);
-			if (!adfEqual(adfToUpload, existingPageData.adfContent)) {
-				this.logger.debug(`Content has changed for: ${adfFile.absoluteFilePath}`);
-
-				// Check if the page title has changed
-				const titleIsDifferent = adfFile.pageTitle !== existingPageData.pageTitle;
-
-				// We need to pass the ancestors through otherwise Confluence returns a 400 error
-				// If there are no ancestors it means the page is at the root of the space and we don't need to pass them
-				interface ContentUpdateData {
-					id: string;
-					title: string;
-					type: string;
-					space: { key: string };
-					version: { number: number };
-					body: {
-						// eslint-disable-next-line @typescript-eslint/naming-convention
-						atlas_doc_format: {
-							value: string;
-							representation: string;
-						};
-					};
-					ancestors?: Array<{ id: string }>;
-					blogpost?: { version: { when: string } };
-				}
-
-				const contentUpdateData: ContentUpdateData = {
-					id: adfFile.pageId,
-					title: adfFile.pageTitle,
-					type: existingPageData.contentType,
-					space: { key: adfFile.spaceKey },
-					version: { number: pageVersionNumber + 1 },
-					body: {
-						// eslint-disable-next-line @typescript-eslint/naming-convention
-						atlas_doc_format: {
-							value: JSON.stringify(adfToUpload),
-							representation: "atlas_doc_format",
-						},
-					},
 				};
+				ancestors?: Array<{ id: string }>;
+				blogpost?: { version: { when: string } };
+			}
 
+			const contentUpdateData: ContentUpdateData = {
+				id: adfFile.pageId,
+				title: adfFile.pageTitle,
+				type: existingPageData.contentType,
+				space: { key: adfFile.spaceKey },
+				version: { number: pageVersionNumber + 1 },
+				body: {
+					// eslint-disable-next-line @typescript-eslint/naming-convention
+					atlas_doc_format: {
+						value: JSON.stringify(adfToUpload),
+						representation: "atlas_doc_format",
+					},
+				},
+			};
+
+			// Handle the parent page/folder ID for the content update
+			// Only set ancestors if the dontChangeParentPageId flag is false
+			if (!adfFile.dontChangeParentPageId) {
+				// Determine the appropriate parent ID based on content type and parentFolderId
+				// A page cannot have both connie-parent-page-id AND connie-parent-folder-id per requirement
+				let parentId: string | undefined;
+
+				if (adfFile.parentPageId) {
+					this.logger.debug(`Using parent page ID from frontmatter: ${adfFile.parentPageId}`);
+					parentId = adfFile.parentPageId;
+				}
+
+				// If we have a parent ID, set it in the ancestors array
+				if (parentId) {
+					this.logger.debug(`Setting ancestors for update to: ${parentId}`);
+					contentUpdateData.ancestors = [{ id: parentId }];
+				} else if (ancestors.length > 0 && ancestors[0] !== undefined) {
+					// Fall back to existing ancestors if we don't have a parent ID from frontmatter
+					this.logger.debug(`Using existing ancestors for update: ${ancestors[0]}`);
+					contentUpdateData.ancestors = [{ id: ancestors[0].id }];
+				}
+			} else {
+				this.logger.debug(`Not changing parent page ID due to 'connie-dont-change-parent-page' flag`);
+				// Preserve existing ancestry if flag is set
 				if (ancestors.length > 0 && ancestors[0] !== undefined) {
-					contentUpdateData.ancestors = [{ id: ancestors[0] }];
+					contentUpdateData.ancestors = [{ id: ancestors[0].id }];
 				}
+			}
 
-				if (adfFile.blogPostDate) {
-					contentUpdateData.blogpost = { version: { when: adfFile.blogPostDate } };
-				}
+			if (adfFile.blogPostDate) {
+				contentUpdateData.blogpost = { version: { when: adfFile.blogPostDate } };
+			}
 
-				if (isEqual(JSON.stringify(adfToUpload), JSON.stringify(existingPageData.adfContent))) {
-					// Only update version and/or title
-					if (titleIsDifferent) {
-						this.logger.debug(`Title has changed for: ${adfFile.absoluteFilePath}`);
-						this.logger.debug(`Updating title from "${existingPageData.pageTitle}" to "${adfFile.pageTitle}"`);
+			if (isEqual(JSON.stringify(adfToUpload), JSON.stringify(existingPageData.adfContent))) {
+				// Only update version and/or title
+				if (titleIsDifferent) {
+					this.logger.debug(`Title has changed for: ${adfFile.absoluteFilePath}`);
+					this.logger.debug(`Updating title from "${existingPageData.pageTitle}" to "${adfFile.pageTitle}"`);
 
-						result.contentResult = "updated";
-
-						this.logger.debug(`Updating content for: ${adfFile.absoluteFilePath}`);
-
-						await this.confluenceClient.content.updateContent(contentUpdateData);
-					} else {
-						this.logger.debug(`Content has not changed for: ${adfFile.absoluteFilePath}`);
-					}
-				} else {
-					this.logger.debug(`Content has changed for: ${adfFile.absoluteFilePath}`);
 					result.contentResult = "updated";
 
 					this.logger.debug(`Updating content for: ${adfFile.absoluteFilePath}`);
 
 					await this.confluenceClient.content.updateContent(contentUpdateData);
+				} else {
+					this.logger.debug(`Content has not changed for: ${adfFile.absoluteFilePath}`);
 				}
 			} else {
-				this.logger.debug(`Content has not changed for: ${adfFile.absoluteFilePath}`);
+				this.logger.debug(`Content has changed for: ${adfFile.absoluteFilePath}`);
+				result.contentResult = "updated";
+
+				this.logger.debug(`Updating content for: ${adfFile.absoluteFilePath}`);
+
+				await this.confluenceClient.content.updateContent(contentUpdateData);
 			}
-
-			// Always ensure labels match, even if content hasn't changed
-			await this.updateLabels(adfFile, result);
-
-			return result;
-		} catch (error) {
-			this.logger.error(`Error updating page content: ${error instanceof Error ? error.message : String(error)}`);
-			throw error;
+		} else {
+			this.logger.debug(`Content has not changed for: ${adfFile.absoluteFilePath}`);
 		}
+
+		// Always ensure labels match, even if content hasn't changed
+		await this.updateLabels(adfFile, result);
+
+		return result;
 	}
 
 	/**
@@ -658,5 +645,21 @@ export class Publisher {
 			// Don't throw the error, as it's not critical for publication
 			result.labelResult = "error";
 		}
+	}
+
+	/** 
+	 * @deprecated This method is not used and will be removed in a future version
+	 */
+	// @ts-expect-error - Method is kept for future reference but not used
+	private async uploadPages(confluencePagesToPublish: ConfluenceNode[]): Promise<UploadAdfFileResult[]> {
+		const results: UploadAdfFileResult[] = [];
+		for (const page of confluencePagesToPublish) {
+			const ancestors = page.ancestors;
+
+			this.logger.debug(`Page has ${ancestors.length} ancestors: ${ancestors.map(a => a.id).join(', ')}`);
+
+			// Rest of the method...
+		}
+		return results;
 	}
 }
